@@ -110,7 +110,6 @@ const userSchema = new mongoose.Schema(
     }
 );
 
-// Indexes for performance (googleId and email already indexed via unique:true)
 userSchema.index({ role: 1, isActive: 1 });
 userSchema.index({ 'refreshTokens.token': 1, 'refreshTokens.fingerprint': 1 });
 
