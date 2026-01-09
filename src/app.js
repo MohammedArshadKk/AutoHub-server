@@ -7,6 +7,9 @@ const morgan = require('morgan');
 
 const configurePassport = require('./config/passport');
 const authRoutes = require('./routes/authRoutes');
+const sellerAuthRoutes = require('./routes/sellerAuthRoutes');
+const adminAuthRoutes = require('./routes/adminAuthRoutes');
+const productRoutes = require('./routes/productRoutes');
 const AppError = require('./utils/AppError');
 
 const {
@@ -111,7 +114,17 @@ app.get('/api/v1/health', (req, res) => {
 
 // ==================== API ROUTES ==================== //
 
+// Buyer auth (Google OAuth)
 app.use('/api/v1/auth', authRoutes);
+
+// Seller auth (Email/Password)
+app.use('/api/v1/seller/auth', sellerAuthRoutes);
+
+// Admin auth (Email/Password)
+app.use('/api/v1/admin/auth', adminAuthRoutes);
+
+// Products
+app.use('/api/v1/products', productRoutes);
 
 // ==================== 404 HANDLER ==================== //
 
