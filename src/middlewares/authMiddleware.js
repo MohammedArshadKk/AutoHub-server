@@ -234,3 +234,77 @@ exports.optionalAuth = catchAsync(async (req, res, next) => {
 
     next();
 });
+
+/**
+ * Protect routes - Accept both admin and seller authentication
+ * Used for endpoints that both admins and sellers can access (like image upload)
+ */
+exports.protectAdminOrSeller = catchAsync(async (req, res, next) => {
+    // Check for admin cookies first
+    const adminAccessToken = req.cookies[ADMIN_COOKIES.ACCESS_TOKEN];
+    const adminFingerprint = req.cookies[ADMIN_COOKIES.FINGERPRINT];
+
+    console.log("adminAccessToken", adminAccessToken);
+    console.log("adminFingerprint", adminFingerprint);
+
+
+    if (adminAccessToken) {
+        // Try admin authentication
+        const { valid, decoded, error } = tokenService.verifyAccessToken(adminAccessToken);
+
+        if (valid) {
+            if (adminFingerprint && decoded.fp) {
+                if (!tokenService.verifyFingerprint(adminFingerprint, decoded.fp)) {
+                    return next(AppError.unauthorized('Invalid token fingerprint'));
+                }
+            }
+
+            const admin = await Admin.findById(decoded.userId);
+
+            if (admin && admin.isActive) {
+                req.admin = {
+                    id: admin.id,
+                    email: admin.email,
+                    name: admin.name,
+                    role: admin.role,
+                    permissions: admin.permissions,
+                };
+                return next();
+            }
+        }
+    }
+
+    // Check for seller cookies
+    const sellerAccessToken = req.cookies[SELLER_COOKIES.ACCESS_TOKEN];
+    const sellerFingerprint = req.cookies[SELLER_COOKIES.FINGERPRINT];
+
+    if (sellerAccessToken) {
+        // Try seller authentication
+        const { valid, decoded, error } = tokenService.verifyAccessToken(sellerAccessToken);
+
+        if (valid) {
+            if (sellerFingerprint && decoded.fp) {
+                if (!tokenService.verifyFingerprint(sellerFingerprint, decoded.fp)) {
+                    return next(AppError.unauthorized('Invalid token fingerprint'));
+                }
+            }
+
+            const seller = await Seller.findById(decoded.userId);
+
+            if (seller && !seller.isBlocked) {
+                req.seller = {
+                    id: seller.id,
+                    email: seller.email,
+                    businessName: seller.businessName,
+                    verificationStatus: seller.verificationStatus,
+                    isActive: seller.isActive,
+                    canListProducts: seller.canListProducts,
+                };
+                return next();
+            }
+        }
+    }
+
+    // No valid authentication found
+    return next(AppError.unauthorized('Please login to access this resource'));
+});

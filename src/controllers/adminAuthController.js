@@ -52,7 +52,7 @@ exports.login = catchAsync(async (req, res, next) => {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        maxAge: 15 * 60 * 1000,
+        maxAge: 2 * 24 * 60 * 60 * 1000, // 2 days
         path: '/',
     });
     res.cookie(ADMIN_COOKIES.REFRESH_TOKEN, refreshToken, {
@@ -66,7 +66,7 @@ exports.login = catchAsync(async (req, res, next) => {
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
         maxAge: 7 * 24 * 60 * 60 * 1000,
-        path: '/api/v1/admin/auth',
+        path: '/',
     });
 
     res.status(200).json({
@@ -130,7 +130,7 @@ exports.refreshToken = catchAsync(async (req, res, next) => {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        maxAge: 15 * 60 * 1000,
+        maxAge: 2 * 24 * 60 * 60 * 1000, // 2 days
         path: '/',
     });
     res.cookie(ADMIN_COOKIES.REFRESH_TOKEN, newRefreshToken, {
@@ -144,7 +144,7 @@ exports.refreshToken = catchAsync(async (req, res, next) => {
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
         maxAge: 7 * 24 * 60 * 60 * 1000,
-        path: '/api/v1/admin/auth',
+        path: '/',
     });
 
     res.status(200).json({
@@ -171,7 +171,7 @@ exports.logout = catchAsync(async (req, res, next) => {
     // Clear cookies
     res.cookie(ADMIN_COOKIES.ACCESS_TOKEN, '', { maxAge: 0, path: '/' });
     res.cookie(ADMIN_COOKIES.REFRESH_TOKEN, '', { maxAge: 0, path: '/api/v1/admin/auth' });
-    res.cookie(ADMIN_COOKIES.FINGERPRINT, '', { maxAge: 0, path: '/api/v1/admin/auth' });
+    res.cookie(ADMIN_COOKIES.FINGERPRINT, '', { maxAge: 0, path: '/' });
 
     res.status(200).json({
         status: 'success',

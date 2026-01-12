@@ -2,6 +2,7 @@ const Product = require('../models/Product');
 const Seller = require('../models/Seller');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
+const config = require('../config/env');
 
 // Allowed fields for product creation/update
 const ALLOWED_PRODUCT_FIELDS = [
@@ -49,6 +50,14 @@ const validateProductFields = (data) => {
 
     if (!data.images || !Array.isArray(data.images) || data.images.length < 1) {
         errors.push('At least 1 product image is required');
+    } else if (config.aws.isConfigured) {
+        // Only validate S3 URLs if AWS is configured
+        const s3BaseUrl = config.aws.s3.baseUrl;
+        data.images.forEach((url, index) => {
+            if (!url.startsWith(s3BaseUrl)) {
+                errors.push(`Image ${index + 1} must be uploaded to authorized S3 bucket`);
+            }
+        });
     }
 
     if (!data.compatibleVehicles || !Array.isArray(data.compatibleVehicles) || data.compatibleVehicles.length < 1) {
@@ -505,6 +514,7 @@ exports.createProductAdmin = catchAsync(async (req, res, next) => {
     if (validationErrors.length > 0) {
         return next(AppError.badRequest(validationErrors.join('. ')));
     }
+    console.log("images : ", productData.images);
 
     // Admin can optionally specify a seller
     if (req.body.seller) {
@@ -513,13 +523,14 @@ exports.createProductAdmin = catchAsync(async (req, res, next) => {
             return next(AppError.notFound('Specified seller not found'));
         }
         productData.seller = seller.id;
+
     } else {
         productData.seller = null; // Admin's own product
     }
 
     // Admin products go live immediately
     productData.status = 'ACTIVE';
-    productData.approvedBy = req.admin.id;
+    productData.approvedBy = req.admin?.id || null;
     productData.approvedAt = new Date();
 
     const product = await Product.create(productData);

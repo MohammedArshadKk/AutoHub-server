@@ -10,6 +10,7 @@ const authRoutes = require('./routes/authRoutes');
 const sellerAuthRoutes = require('./routes/sellerAuthRoutes');
 const adminAuthRoutes = require('./routes/adminAuthRoutes');
 const productRoutes = require('./routes/productRoutes');
+const uploadRoutes = require('./routes/uploadRoutes');
 const AppError = require('./utils/AppError');
 
 const {
@@ -125,6 +126,9 @@ app.use('/api/v1/admin/auth', adminAuthRoutes);
 
 // Products
 app.use('/api/v1/products', productRoutes);
+
+// Upload (S3 pre-signed URLs)
+app.use('/api/v1/upload', uploadRoutes);
 
 // ==================== 404 HANDLER ==================== //
 

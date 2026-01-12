@@ -10,13 +10,26 @@ const path = require('path');
 // Load .env file (only affects development - production uses system env vars)
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
-const requiredSecrets = [
+// Core required secrets (always needed)
+const coreRequiredSecrets = [
   'MONGODB_URI',
   'GOOGLE_CLIENT_ID',
   'GOOGLE_CLIENT_SECRET',
   'JWT_ACCESS_SECRET',
   'JWT_REFRESH_SECRET',
 ];
+
+// AWS secrets (required in production, optional in development)
+const awsSecrets = [
+  'AWS_REGION',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_S3_BUCKET_NAME',
+];
+
+const requiredSecrets = process.env.NODE_ENV === 'production'
+  ? [...coreRequiredSecrets, ...awsSecrets]
+  : coreRequiredSecrets;
 
 /**
  * Validate that all required secrets are present
@@ -115,6 +128,34 @@ const config = {
   // Frontend URL
   get frontendUrl() {
     return process.env.FRONTEND_URL || 'http://localhost:3000';
+  },
+
+  // AWS S3 Configuration
+  aws: {
+    get region() {
+      return process.env.AWS_REGION || null;
+    },
+    get accessKeyId() {
+      return process.env.AWS_ACCESS_KEY_ID || null;
+    },
+    get secretAccessKey() {
+      return process.env.AWS_SECRET_ACCESS_KEY || null;
+    },
+    get isConfigured() {
+      return !!(process.env.AWS_REGION && process.env.AWS_ACCESS_KEY_ID &&
+        process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_S3_BUCKET_NAME);
+    },
+    s3: {
+      get bucketName() {
+        return process.env.AWS_S3_BUCKET_NAME || null;
+      },
+      get baseUrl() {
+        const bucketName = process.env.AWS_S3_BUCKET_NAME;
+        const region = process.env.AWS_REGION;
+        if (!bucketName || !region) return null;
+        return process.env.AWS_S3_BASE_URL || `https://${bucketName}.s3.${region}.amazonaws.com`;
+      },
+    },
   },
 
   // Rate Limiting

@@ -22,5 +22,6 @@ AppError.notFound = (message = 'Not Found') => new AppError(message, 404);
 AppError.conflict = (message = 'Conflict') => new AppError(message, 409);
 AppError.tooManyRequests = (message = 'Too Many Requests') => new AppError(message, 429);
 AppError.internal = (message = 'Internal Server Error') => new AppError(message, 500);
+AppError.serviceUnavailable = (message = 'Service Unavailable') => new AppError(message, 503);
 
 module.exports = AppError;
