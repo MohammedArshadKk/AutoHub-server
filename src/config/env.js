@@ -98,7 +98,7 @@ const config = {
       return getSecret('GOOGLE_CLIENT_SECRET');
     },
     get callbackUrl() {
-      return process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5000/api/v1/auth/google/callback';
+      return process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5001/api/v1/auth/google/callback';
     },
   },
 

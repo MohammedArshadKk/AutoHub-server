@@ -149,6 +149,12 @@ userSchema.methods.addRefreshToken = async function (token, fingerprint, expires
 
     // Remove expired tokens and limit to 5 active sessions
     const now = new Date();
+
+    // Ensure array exists
+    if (!this.refreshTokens) {
+        this.refreshTokens = [];
+    }
+
     this.refreshTokens = this.refreshTokens
         .filter((rt) => rt.expiresAt > now)
         .slice(-4); // Keep only last 4, we'll add 1 more

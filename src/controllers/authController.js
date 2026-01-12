@@ -23,15 +23,19 @@ exports.initiateGoogleAuth = passport.authenticate('google', {
  */
 exports.googleCallback = (req, res, next) => {
     passport.authenticate('google', { session: false }, async (err, user, info) => {
+        console.log('\n🔍 === GOOGLE OAUTH CALLBACK ===');
         try {
             if (err) {
-                console.error('Google OAuth Error:', err);
+                console.error('❌ Google OAuth Error:', err);
                 return res.redirect(`${env.frontendUrl}/login?error=oauth_error`);
             }
 
             if (!user) {
+                console.error('❌ No user returned from Passport');
                 return res.redirect(`${env.frontendUrl}/login?error=no_user`);
             }
+
+            console.log('✅ User authenticated:', { id: user.id, email: user.email, role: user.role });
 
             // Check if user is active
             if (!user.isActive) {
@@ -52,15 +56,25 @@ exports.googleCallback = (req, res, next) => {
 
             // Store refresh token in database
             const expiresAt = tokenService.getRefreshTokenExpiry();
+            console.log('💾 Storing refresh token in database...');
             await user.addRefreshToken(refreshToken, fingerprint, expiresAt);
+            console.log('✅ Refresh token stored successfully');
 
             // Set cookies
+            console.log('🍪 Setting auth cookies...');
             setAuthCookies(res, accessToken, refreshToken, fingerprint);
+            console.log('✅ Cookies set successfully');
+
+            console.log('🔄 Redirecting to:', `${env.frontendUrl}/auth/success`);
+            console.log('=== END OAUTH CALLBACK ===\n');
 
             // Redirect to frontend
             res.redirect(`${env.frontendUrl}/auth/success`);
         } catch (error) {
-            console.error('Callback Error:', error);
+            console.error('❌ === OAUTH CALLBACK ERROR ===');
+            console.error('Error:', error);
+            console.error('Stack:', error.stack);
+            console.error('=== END ERROR ===\n');
             res.redirect(`${env.frontendUrl}/login?error=server_error`);
         }
     })(req, res, next);
@@ -256,7 +270,13 @@ exports.updateMe = catchAsync(async (req, res, next) => {
 exports.checkAuthStatus = catchAsync(async (req, res, next) => {
     const accessToken = req.cookies[COOKIE_NAMES.ACCESS_TOKEN];
 
+    console.log('\n🔍 === CHECK AUTH STATUS ===');
+    console.log('Incoming Cookies:', req.cookies);
+    console.log('Access Token present:', !!accessToken);
+
     if (!accessToken) {
+        console.log('❌ No access token found in cookies');
+        console.log('===========================\n');
         return res.status(200).json({
             status: 'success',
             data: {

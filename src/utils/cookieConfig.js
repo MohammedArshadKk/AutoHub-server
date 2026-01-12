@@ -57,6 +57,13 @@ const COOKIE_NAMES = {
 
 // Set authentication cookies
 const setAuthCookies = (res, accessToken, refreshToken, fingerprint) => {
+    console.log('🍪 Setting cookies with options:', {
+        secure: accessTokenCookieOptions.secure,
+        sameSite: accessTokenCookieOptions.sameSite,
+        httpOnly: accessTokenCookieOptions.httpOnly,
+        domain: accessTokenCookieOptions.domain
+    });
+
     res.cookie(COOKIE_NAMES.ACCESS_TOKEN, accessToken, accessTokenCookieOptions);
     res.cookie(COOKIE_NAMES.REFRESH_TOKEN, refreshToken, refreshTokenCookieOptions);
     res.cookie(COOKIE_NAMES.FINGERPRINT, fingerprint, {

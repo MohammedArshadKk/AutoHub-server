@@ -63,6 +63,52 @@ exports.protect = catchAsync(async (req, res, next) => {
 });
 
 /**
+ * Protect buyer routes - Verify buyer access token and role
+ */
+exports.protectBuyer = catchAsync(async (req, res, next) => {
+    const accessToken = req.cookies[COOKIE_NAMES.ACCESS_TOKEN];
+    const fingerprint = req.cookies[COOKIE_NAMES.FINGERPRINT];
+
+    if (!accessToken) {
+        return next(AppError.unauthorized('Please login to access this resource'));
+    }
+
+    const { valid, decoded, error } = tokenService.verifyAccessToken(accessToken);
+
+    if (!valid) {
+        if (error === 'expired') {
+            return next(AppError.unauthorized('Token expired. Please refresh your token.'));
+        }
+        return next(AppError.unauthorized('Invalid token'));
+    }
+
+    if (fingerprint && decoded.fp) {
+        if (!tokenService.verifyFingerprint(fingerprint, decoded.fp)) {
+            return next(AppError.unauthorized('Invalid token fingerprint'));
+        }
+    }
+
+    const user = await User.findById(decoded.userId);
+
+    if (!user) {
+        return next(AppError.unauthorized('User no longer exists'));
+    }
+
+    if (!user.isActive) {
+        return next(AppError.unauthorized('Your account has been deactivated'));
+    }
+
+    // Check if user is a buyer
+    if (user.role !== 'buyer') {
+        return next(AppError.forbidden('This resource is only accessible to buyers'));
+    }
+
+    req.user = user; // Attach full user object for buyer operations
+
+    next();
+});
+
+/**
  * Protect seller routes
  */
 exports.protectSeller = catchAsync(async (req, res, next) => {
