@@ -49,8 +49,8 @@ if (env.isProduction) {
 // Security HTTP headers
 app.use(securityHeaders);
 
-// Rate limiting
-app.use('/api', generalLimiter);
+// Rate limiting - DISABLED FOR DEVELOPMENT
+// app.use('/api', generalLimiter);
 
 // ==================== BODY PARSING ==================== //
 

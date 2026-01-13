@@ -22,7 +22,6 @@ exports.addToCart = catchAsync(async (req, res, next) => {
         return next(AppError.badRequest('Quantity must be at least 1'));
     }
 
-    // Check if product exists and is active
     const product = await Product.findById(productId);
     if (!product) {
         return next(AppError.notFound('Product not found'));
@@ -74,13 +73,35 @@ exports.addToCart = catchAsync(async (req, res, next) => {
  * @access  Private (Buyer)
  */
 exports.getCart = catchAsync(async (req, res, next) => {
+    console.log('\n🛒 === GET CART ===');
+    console.log('Buyer ID:', req.user._id);
+
     // Find or create cart
     let cart = await Cart.findOrCreateCart(req.user._id);
+    console.log('Cart ID:', cart._id);
+    console.log('Items in cart before populate:', cart.items.length);
 
     // Populate product details
     await cart.populate({
         path: 'items.product',
-        select: 'name price originalPrice images stock category condition brand inStock',
+        select: 'name price originalPrice images stock category condition brand inStock status isDeleted',
+    });
+
+    console.log('Items after populate:', cart.items.length);
+
+    // Debug each item
+    cart.items.forEach((item, index) => {
+        console.log(`\n📦 Item ${index + 1}:`);
+        console.log('  Product exists:', !!item.product);
+        if (item.product) {
+            console.log('  Product ID:', item.product._id);
+            console.log('  Product name:', item.product.name);
+            console.log('  Product status:', item.product.status);
+            console.log('  Product isDeleted:', item.product.isDeleted);
+            console.log('  Will be filtered?', !(item.product.status === 'ACTIVE' && !item.product.isDeleted));
+        } else {
+            console.log('  ❌ Product is NULL - will be filtered out!');
+        }
     });
 
     // Filter out items with deleted/inactive products
@@ -88,11 +109,19 @@ exports.getCart = catchAsync(async (req, res, next) => {
         (item) => item.product && item.product.status === 'ACTIVE' && !item.product.isDeleted
     );
 
+    console.log('\n📊 Filter Results:');
+    console.log('Original items:', cart.items.length);
+    console.log('Valid items:', validItems.length);
+    console.log('Filtered out:', cart.items.length - validItems.length);
+
     // If any items were filtered out, update cart
     if (validItems.length !== cart.items.length) {
+        console.log('⚠️  Items were filtered - updating cart in DB');
         cart.items = validItems;
         await cart.save();
     }
+
+    console.log('=== END GET CART ===\n');
 
     res.status(200).json({
         status: 'success',
