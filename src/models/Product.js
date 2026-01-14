@@ -20,15 +20,17 @@ const productSchema = new mongoose.Schema(
             uppercase: true,
         },
 
-        // Images
+        // Images (optional - can be added later)
         images: {
             type: [String],
             validate: {
                 validator: function (v) {
-                    return v.length >= 1 && v.length <= 10;
+                    // Allow empty array or 1-10 images
+                    return v.length === 0 || (v.length >= 1 && v.length <= 10);
                 },
-                message: 'Product must have 1-10 images',
+                message: 'Product must have 0-10 images',
             },
+            default: [],
         },
 
         // Pricing

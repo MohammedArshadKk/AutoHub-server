@@ -329,7 +329,154 @@ PATCH /products/admin/:id/reject
 }
 ```
 
----
+### Bulk Create Products (JSON Array)
+```
+POST /products/bulk
+```
+**Description:** Create multiple products at once from a JSON array. Frontend parses Excel and sends JSON.
+
+**Requires:** Admin authentication  
+**Content-Type:** `application/json`
+
+**Request Body:**
+```json
+{
+  "products": [
+    {
+      "name": "Bosch High Output Alternator - 150 Amp",
+      "description": "High-performance alternator with 150 amp output...",
+      "category": "Electrical",
+      "price": 4500,
+      "stock": 10,
+      "condition": "New",
+      "status": "PENDING_APPROVAL",
+      "brand": "Bosch",
+      "partNumber": "ALT-150-BOSCH",
+      "warranty": "2 years",
+      "compatibleVehicles": [
+        {
+          "year": 2018,
+          "make": "Toyota",
+          "model": "Camry",
+          "variant": "LE 2.5L"
+        }
+      ],
+      "specifications": {
+        "Output": "150 Amps",
+        "Material": "Aluminum"
+      }
+    },
+    {
+      "name": "Front Disc Brake Pads",
+      "description": "Premium ceramic brake pads...",
+      "category": "Brakes",
+      "price": 2500,
+      "stock": 25
+    }
+  ]
+}
+```
+
+**Validation Rules:**
+- **Required:** name, description, category
+- **Optional:** All other product fields
+- **Max Products:** 100 per request
+- **Categories:** Must be valid from enum
+- **Vehicles:** Max 5 per product
+
+**Success Response:** `200 OK`
+```json
+{
+  "success": true,
+  "message": "Bulk upload completed",
+  "data": {
+    "total": 2,
+    "successCount": 2,
+    "failureCount": 0,
+    "results": [
+      {
+        "index": 0,
+        "success": true,
+        "productId": "65f8a1b2c3d4e5f6a7b8c9d0",
+        "name": "Bosch High Output Alternator - 150 Amp"
+      },
+      {
+        "index": 1,
+        "success": true,
+        "productId": "65f8a2b3c4d5e6f7a8b9c0d1",
+        "name": "Front Disc Brake Pads"
+      }
+    ]
+  }
+}
+```
+
+**Partial Success Response:** `200 OK`
+```json
+{
+  "success": true,
+  "message": "Bulk upload completed with some failures",
+  "data": {
+    "total": 3,
+    "successCount": 2,
+    "failureCount": 1,
+    "results": [
+      {
+        "index": 0,
+        "success": true,
+        "productId": "65f8a1b2c3d4e5f6a7b8c9d0"
+      },
+      {
+        "index": 1,
+        "success": false,
+        "error": "Duplicate product name",
+        "name": "Existing Product"
+      },
+      {
+        "index": 2,
+        "success": true,
+        "productId": "65f8a3b4c5d6e7f8a9b0c1d2"
+      }
+    ]
+  }
+}
+```
+
+**Validation Error Response:** `400 Bad Request`
+```json
+{
+  "success": false,
+  "message": "Validation failed",
+  "errors": [
+    {
+      "index": 0,
+      "field": "category",
+      "message": "\"category\" must be one of [Engine, Transmission, ...]"
+    },
+    {
+      "index": 1,
+      "field": "price",
+      "message": "\"price\" must be a number"
+    }
+  ]
+}
+```
+
+**Frontend Workflow:**
+1. User uploads Excel file in browser
+2. Frontend parses Excel using `xlsx` library
+3. Transform Excel rows to product objects
+4. Send JSON array to this endpoint
+5. Display results to user
+
+**Error Responses:**
+
+| Status | Message | Reason |
+|--------|---------|--------|
+| 400 | "Validation failed" | Invalid product data |
+| 401 | "Please login to access this resource" | Not authenticated |
+| 403 | "This resource is only accessible to admins" | Not admin role |
+
 
 ## Product Categories
 

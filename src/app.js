@@ -12,6 +12,7 @@ const adminAuthRoutes = require('./routes/adminAuthRoutes');
 const productRoutes = require('./routes/productRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const cartRoutes = require('./routes/cartRoutes');
+const bulkUploadRoutes = require('./routes/bulkUploadRoutes');
 const AppError = require('./utils/AppError');
 
 const {
@@ -133,6 +134,9 @@ app.use('/api/v1/upload', uploadRoutes);
 
 // Shopping Cart (Buyer)
 app.use('/api/v1/cart', cartRoutes);
+
+// Bulk Product Upload (Admin)
+app.use('/api/v1/products/bulk', bulkUploadRoutes);
 
 // ==================== 404 HANDLER ==================== //
 
