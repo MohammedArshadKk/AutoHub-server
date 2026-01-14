@@ -125,9 +125,18 @@ const config = {
     },
   },
 
-  // Frontend URL
+  // Frontend URLs
+  get buyerFrontendUrl() {
+    return process.env.BUYER_FRONTEND_URL || 'http://localhost:5173';
+  },
+
+  get adminFrontendUrl() {
+    return process.env.ADMIN_FRONTEND_URL || 'http://localhost:5000';
+  },
+
   get frontendUrl() {
-    return process.env.FRONTEND_URL || 'http://localhost:3000';
+    // Legacy support - defaults to buyer frontend
+    return process.env.FRONTEND_URL || this.buyerFrontendUrl;
   },
 
   // AWS S3 Configuration
