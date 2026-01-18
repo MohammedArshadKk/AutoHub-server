@@ -82,25 +82,10 @@ const userSchema = new mongoose.Schema(
             type: Date,
             default: null,
         },
-        // Buyer-specific fields
         phone: {
             type: String,
             trim: true,
             default: null,
-        },
-        addresses: {
-            type: [
-                {
-                    label: { type: String, default: 'Home' },
-                    street: String,
-                    city: String,
-                    state: String,
-                    postalCode: String,
-                    country: { type: String, default: 'India' },
-                    isDefault: { type: Boolean, default: false },
-                },
-            ],
-            default: [],
         },
     },
     {
@@ -113,18 +98,12 @@ const userSchema = new mongoose.Schema(
 userSchema.index({ role: 1, isActive: 1 });
 userSchema.index({ 'refreshTokens.token': 1, 'refreshTokens.fingerprint': 1 });
 
-// Virtual for checking if account is locked
 userSchema.virtual('isLocked').get(function () {
     return !!(this.lockUntil && this.lockUntil > Date.now());
 });
-
-// Constants for account locking
 const MAX_LOGIN_ATTEMPTS = 5;
-const LOCK_TIME = 2 * 60 * 60 * 1000; // 2 hours
-
-// Method to increment login attempts
+const LOCK_TIME = 2 * 60 * 60 * 1000;
 userSchema.methods.incLoginAttempts = async function () {
-    // If previous lock has expired, reset attempts
     if (this.lockUntil && this.lockUntil < Date.now()) {
         return this.updateOne({
             $set: { loginAttempts: 1 },
@@ -133,8 +112,6 @@ userSchema.methods.incLoginAttempts = async function () {
     }
 
     const updates = { $inc: { loginAttempts: 1 } };
-
-    // Lock account if we've reached max attempts
     if (this.loginAttempts + 1 >= MAX_LOGIN_ATTEMPTS && !this.isLocked) {
         updates.$set = { lockUntil: Date.now() + LOCK_TIME };
     }
@@ -142,22 +119,19 @@ userSchema.methods.incLoginAttempts = async function () {
     return this.updateOne(updates);
 };
 
-// Method to add refresh token
 userSchema.methods.addRefreshToken = async function (token, fingerprint, expiresAt) {
-    // Hash the token for storage (we store hash, not actual token)
+
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
-    // Remove expired tokens and limit to 5 active sessions
     const now = new Date();
 
-    // Ensure array exists
     if (!this.refreshTokens) {
         this.refreshTokens = [];
     }
 
     this.refreshTokens = this.refreshTokens
         .filter((rt) => rt.expiresAt > now)
-        .slice(-4); // Keep only last 4, we'll add 1 more
+        .slice(-4);
 
     this.refreshTokens.push({
         token: tokenHash,
@@ -168,7 +142,6 @@ userSchema.methods.addRefreshToken = async function (token, fingerprint, expires
     return this.save();
 };
 
-// Method to verify and remove refresh token
 userSchema.methods.verifyRefreshToken = function (token, fingerprint) {
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
@@ -182,7 +155,6 @@ userSchema.methods.verifyRefreshToken = function (token, fingerprint) {
     return tokenIndex !== -1;
 };
 
-// Method to remove specific refresh token (for logout)
 userSchema.methods.removeRefreshToken = async function (token) {
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
@@ -193,13 +165,10 @@ userSchema.methods.removeRefreshToken = async function (token) {
     return this.save();
 };
 
-// Method to remove all refresh tokens (logout from all devices)
 userSchema.methods.removeAllRefreshTokens = async function () {
     this.refreshTokens = [];
     return this.save();
 };
-
-// Static method to find user by refresh token
 userSchema.statics.findByRefreshToken = async function (token, fingerprint) {
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
@@ -211,9 +180,7 @@ userSchema.statics.findByRefreshToken = async function (token, fingerprint) {
     }).select('+refreshTokens');
 };
 
-// Pre-save middleware to sanitize data
 userSchema.pre('save', function (next) {
-    // Sanitize name
     if (this.isModified('name')) {
         this.name = this.name.replace(/[<>]/g, '');
     }
