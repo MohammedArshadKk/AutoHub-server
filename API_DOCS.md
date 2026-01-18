@@ -850,6 +850,665 @@ Carts include computed fields:
 
 ---
 
+## Orders & Payments - Buyer
+
+All order endpoints require buyer authentication via `accessToken` cookie.
+
+### Create COD Order
+```
+POST /orders
+```
+**Description:** Create a cash-on-delivery order directly. Products are validated and prices are fetched from database.
+
+**Requires:** Buyer authentication
+
+**Request Body:**
+```json
+{
+  "items": [
+    {
+      "_id": "65f8a1b2c3d4e5f6a7b8c9d0",
+      "name": "Brake Pad Set",
+      "price": 1500,
+      "quantity": 2,
+      "images": []
+    }
+  ],
+  "shippingAddress": {
+    "fullName": "John Doe",
+    "phone": "+91 9876543210",
+    "addressLine1": "123 Main Street",
+    "addressLine2": "",
+    "city": "Mumbai",
+    "state": "Maharashtra",
+    "zipCode": "400001",
+    "country": "India"
+  },
+  "pricing": {
+    "subtotal": 3000,
+    "shippingCharge": 50,
+    "handlingCharge": 20,
+    "tax": 0,
+    "totalAmount": 3070
+  }
+}
+```
+
+**Automatic Calculations:**
+- Shipping: Free for orders ≥ ₹1000, else ₹50
+- Handling: ₹20 per order
+- Prices validated against database
+
+**Success Response:** `201 Created`
+```json
+{
+  "status": "success",
+  "message": "Order placed successfully",
+  "data": {
+    "order": {
+      "_id": "65f8c1234567890abcdef456",
+      "orderNumber": "ORD000001",
+      "totalAmount": 3070,
+      "orderStatus": "pending",
+      "paymentStatus": "pending",
+      "orderedAt": "2026-01-18T10:45:00.000Z"
+    }
+  }
+}
+```
+
+**Error Responses:**
+
+| Status | Message |
+|--------|---------|
+| 400 | "Order must contain at least one item" |
+| 400 | "Shipping address is required" |
+| 404 | "Product not found" |
+| 400 | "Product is not available for purchase" |
+| 400 | "Insufficient stock" |
+
+---
+
+### Create Order for Online Payment
+```
+POST /orders/create-for-payment
+```
+**Description:** Create order with status `payment_pending` before initiating Razorpay payment.
+
+**Requires:** Buyer authentication
+
+**Request Body:** Same as COD order
+
+**Success Response:** `201 Created`
+```json
+{
+  "status": "success",
+  "message": "Order created, awaiting payment",
+  "data": {
+    "order": {
+      "_id": "65f8c2345678901bcdef567",
+      "orderNumber": "ORD000002",
+      "totalAmount": 3070,
+      "orderStatus": "payment_pending",
+      "paymentStatus": "pending_payment"
+    }
+  }
+}
+```
+
+---
+
+### Initiate Payment
+```
+POST /orders/:orderId/payment/initiate
+```
+**Description:** Create Razorpay order and return credentials for frontend payment modal.
+
+**Requires:** Buyer authentication
+
+**URL Parameters:**
+- `orderId` - Order ID (must be in `payment_pending` status)
+
+**Success Response:** `200 OK`
+```json
+{
+  "status": "success",
+  "message": "Payment initiated",
+  "data": {
+    "razorpayOrderId": "order_MaB1xVZ8j9KpLk",
+    "amount": 307000,
+    "currency": "INR",
+    "keyId": "rzp_test_xxxxxxxxxxxxx"
+  }
+}
+```
+
+**Error Responses:**
+
+| Status | Message |
+|--------|---------|
+| 404 | "Order not found" |
+| 400 | "Order is not awaiting payment" |
+| 500 | "Payment gateway not configured" |
+
+---
+
+### Verify Payment
+```
+POST /orders/:orderId/payment/verify
+```
+**Description:** Verify Razorpay payment signature and update order status to `confirmed`.
+
+**Requires:** Buyer authentication
+
+**URL Parameters:**
+- `orderId` - Order ID
+
+**Request Body:**
+```json
+{
+  "razorpayOrderId": "order_MaB1xVZ8j9KpLk",
+  "razorpayPaymentId": "pay_NaC2yWA9k0QqMn",
+  "razorpaySignature": "abc123def456..."
+}
+```
+
+**Success Response:** `200 OK`
+```json
+{
+  "status": "success",
+  "message": "Payment verified successfully. Order confirmed!",
+  "data": {
+    "order": {
+      "_id": "65f8c2345678901bcdef567",
+      "orderNumber": "ORD000002",
+      "orderStatus": "confirmed",
+      "paymentStatus": "paid",
+      "razorpayPaymentId": "pay_NaC2yWA9k0QqMn"
+    }
+  }
+}
+```
+
+**Error Responses:**
+
+| Status | Message |
+|--------|---------|
+| 400 | "Missing payment verification details" |
+| 400 | "Payment verification failed. Invalid signature." |
+| 400 | "Payment not captured. Please try again." |
+| 404 | "Order not found" |
+
+**Note:** Failed verification updates order status to `payment_failed`.
+
+---
+
+### Get My Orders
+```
+GET /orders/my-orders
+```
+**Description:** Retrieve all orders for the logged-in buyer with pagination.
+
+**Requires:** Buyer authentication
+
+**Query Parameters:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| status | string | Filter by order status |
+| page | number | Page number (default: 1) |
+| limit | number | Items per page (default: 10) |
+
+**Success Response:** `200 OK`
+```json
+{
+  "status": "success",
+  "data": {
+    "orders": [
+      {
+        "_id": "65f8c1234567890abcdef456",
+        "orderNumber": "ORD000001",
+        "items": [
+          {
+            "product": {
+              "_id": "65f8a1b2c3d4e5f6a7b8c9d0",
+              "name": "Brake Pad Set",
+              "images": ["https://..."],
+              "price": 1500
+            },
+            "quantity": 2,
+            "price": 1500
+          }
+        ],
+        "totalAmount": 3070,
+        "orderStatus": "delivered",
+        "paymentStatus": "paid",
+        "paymentMethod": "online",
+        "orderedAt": "2026-01-15T10:00:00.000Z",
+        "deliveredAt": "2026-01-17T14:30:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 10,
+      "total": 25,
+      "pages": 3
+    }
+  }
+}
+```
+
+---
+
+### Get Order by ID
+```
+GET /orders/:orderId
+```
+**Description:** Get detailed information about a specific order.
+
+**Requires:** Buyer authentication (must be order owner)
+
+**URL Parameters:**
+- `orderId` - Order ID
+
+**Success Response:** `200 OK`
+```json
+{
+  "status": "success",
+  "data": {
+    "order": {
+      "_id": "65f8c1234567890abcdef456",
+      "orderNumber": "ORD000001",
+      "buyer": "65f8a0000000000000000001",
+      "items": [...],
+      "shippingAddress": {
+        "fullName": "John Doe",
+        "phone": "+91 9876543210",
+        "addressLine1": "123 Main Street",
+        "city": "Mumbai",
+        "state": "Maharashtra",
+        "zipCode": "400001",
+        "country": "India"
+      },
+      "subtotal": 3000,
+      "shippingCharge": 50,
+      "handlingCharge": 20,
+      "tax": 0,
+      "totalAmount": 3070,
+      "paymentMethod": "cod",
+      "paymentStatus": "pending",
+      "orderStatus": "processing",
+      "orderedAt": "2026-01-18T10:45:00.000Z",
+      "trackingNumber": null,
+      "createdAt": "2026-01-18T10:45:00.000Z",
+      "updatedAt": "2026-01-18T11:00:00.000Z"
+    }
+  }
+}
+```
+
+**Error Response:**
+
+| Status | Message |
+|--------|---------|
+| 404 | "Order not found" |
+
+---
+
+### Cancel Order
+```
+POST /orders/:orderId/cancel
+```
+**Description:** Cancel an order. Automatically processes refund for paid orders.
+
+**Requires:** Buyer authentication
+
+**URL Parameters:**
+- `orderId` - Order ID
+
+**Request Body:**
+```json
+{
+  "reason": "Changed my mind"
+}
+```
+
+**Success Response:** `200 OK`
+```json
+{
+  "status": "success",
+  "message": "Order cancelled successfully",
+  "data": {
+    "order": {
+      "_id": "65f8c1234567890abcdef456",
+      "orderNumber": "ORD000001",
+      "orderStatus": "cancelled",
+      "cancelledAt": "2026-01-18T11:30:00.000Z",
+      "cancellationReason": "Changed my mind"
+    }
+  }
+}
+```
+
+**Cancellable Statuses:**
+- `pending` (COD)
+- `payment_pending` (Awaiting payment)
+- `confirmed` (Just confirmed)
+
+**Error Responses:**
+
+| Status | Message |
+|--------|---------|
+| 400 | "Order cannot be cancelled. Current status: shipped" |
+| 404 | "Order not found" |
+
+**Note:** Refund is automatically initiated for paid orders. Refund status may be updated via webhooks.
+
+---
+
+## Order Status Flow
+
+### COD Flow
+```
+pending → confirmed → processing → shipped → delivered
+   ↓
+cancelled
+```
+
+### Online Payment Flow
+```
+payment_pending → confirmed → processing → shipped → delivered
+   ↓                 ↓
+payment_failed   cancelled
+```
+
+### Order Statuses
+
+| Status | Description |
+|--------|-------------|
+| `payment_pending` | Waiting for online payment |
+| `pending` | COD order awaiting confirmation |
+| `confirmed` | Order confirmed (payment verified) |
+| `processing` | Being prepared for shipment |
+| `shipped` | On the way to customer |
+| `delivered` | Successfully delivered |
+| `cancelled` | Cancelled by user or admin |
+| `payment_failed` | Payment verification failed |
+
+### Payment Statuses
+
+| Status | Description |
+|--------|-------------|
+| `pending_payment` | Awaiting payment |
+| `pending` | COD - payment on delivery |
+| `paid` | Payment successful |
+| `failed` | Payment failed |
+
+---
+
+## Address Management - Buyer
+
+All address endpoints require buyer authentication via `accessToken` cookie.
+
+### Get All Addresses
+```
+GET /addresses
+```
+**Description:** Retrieve all addresses for logged-in buyer. Returns addresses sorted by default first, then by creation date.
+
+**Requires:** Buyer authentication
+
+**Success Response:** `200 OK`
+```json
+{
+  "status": "success",
+  "results": 2,
+  "data": {
+    "addresses": [
+      {
+        "_id": "65f8a1234567890abcdef123",
+        "user": "65f8a0000000000000000001",
+        "title": "Home",
+        "fullName": "John Doe",
+        "phone": "9876543210",
+        "addressLine1": "123 MG Road",
+        "addressLine2": "Near Metro Station",
+        "city": "Bangalore",
+        "state": "Karnataka",
+        "zipCode": "560001",
+        "country": "India",
+        "latitude": 12.9716,
+        "longitude": 77.5946,
+        "location": {
+          "type": "Point",
+          "coordinates": [77.5946, 12.9716]
+        },
+        "isDefault": true,
+        "createdAt": "2026-01-15T12:00:00.000Z",
+        "updatedAt": "2026-01-15T12:00:00.000Z"
+      },
+      {
+        "_id": "65f8b2345678901bcdef234",
+        "title": "Office",
+        "fullName": "John Doe",
+        "addressLine1": "456 Tech Park",
+        "city": "Bangalore",
+        "state": "Karnataka",
+        "zipCode": "560100",
+        "isDefault": false,
+        ...
+      }
+    ]
+  }
+}
+```
+
+---
+
+### Get Single Address
+```
+GET /addresses/:id
+```
+**Description:** Get details of a specific address. User must own the address.
+
+**Requires:** Buyer authentication
+
+**Success Response:** `200 OK`
+```json
+{
+  "status": "success",
+  "data": {
+    "address": {
+      "_id": "65f8a1234567890abcdef123",
+      "title": "Home",
+      "fullName": "John Doe",
+      ...
+    }
+  }
+}
+```
+
+**Error Responses:**
+
+| Status | Message |
+|--------|---------|
+| 404 | "Address not found" |
+| 403 | "Not authorized to access this address" |
+
+---
+
+### Create Address
+```
+POST /addresses
+```
+**Description:** Create a new address. If this is the first address, it will automatically be set as default.
+
+**Requires:** Buyer authentication
+
+**Request Body:**
+```json
+{
+  "title": "Home",
+  "fullName": "John Doe",
+  "phone": "9876543210",
+  "addressLine1": "123 MG Road",
+  "addressLine2": "Near Metro Station",
+  "city": "Bangalore",
+  "state": "Karnataka",
+  "zipCode": "560001",
+  "latitude": 12.9716,
+  "longitude": 77.5946,
+  "googleMapsLink": "https://goo.gl/maps/..."
+}
+```
+
+**Required Fields:**
+- `title` (max 50 chars)
+- `fullName` (max 100 chars)
+- `phone` (10 digits starting with 6-9, with or without +91 prefix)
+- `addressLine1` (max 200 chars)
+- `city`
+- `state`
+- `zipCode` (6 digits)
+
+**Optional Fields:**
+- `addressLine2`, `latitude`, `longitude`, `googleMapsLink`, `isDefault`
+
+**Success Response:** `201 Created`
+```json
+{
+  "status": "success",
+  "data": {
+    "address": {
+      "_id": "65f8a1234567890abcdef123",
+      "isDefault": true,
+      ...
+    }
+  }
+}
+```
+
+**Validation Errors:** `400 Bad Request`
+```json
+{
+  "status": "fail",
+  "message": "Please provide a valid 10-digit phone number starting with 6-9"
+}
+```
+
+---
+
+### Update Address
+```
+PUT /addresses/:id
+```
+**Description:** Update an existing address. User must own the address.
+
+**Requires:** Buyer authentication
+
+**Request Body:** Same as Create Address (all fields optional)
+
+**Success Response:** `200 OK`
+```json
+{
+  "status": "success",
+  "data": {
+    "address": {
+      "_id": "65f8a1234567890abcdef123",
+      ...
+    }
+  }
+}
+```
+
+**Error Responses:**
+
+| Status | Message |
+|--------|---------|
+| 404 | "Address not found" |
+| 403 | "Not authorized to update this address" |
+| 400 | Validation errors |
+
+---
+
+### Delete Address
+```
+DELETE /addresses/:id
+```
+**Description:** Delete an address. If the deleted address was default, another address will automatically be set as default.
+
+**Requires:** Buyer authentication
+
+**Success Response:** `200 OK`
+```json
+{
+  "status": "success",
+  "message": "Address deleted successfully",
+  "data": null
+}
+```
+
+**Error Responses:**
+
+| Status | Message |
+|--------|---------|
+| 404 | "Address not found" |
+| 403 | "Not authorized to delete this address" |
+
+---
+
+### Set as Default Address
+```
+PATCH /addresses/:id/default
+```
+**Description:** Set a specific address as the default. All other addresses will be unmarked as default.
+
+**Requires:** Buyer authentication
+
+**Success Response:** `200 OK`
+```json
+{
+  "status": "success",
+  "data": {
+    "address": {
+      "_id": "65f8a1234567890abcdef123",
+      "isDefault": true,
+      ...
+    }
+  }
+}
+```
+
+**Error Responses:**
+
+| Status | Message |
+|--------|---------|
+| 404 | "Address not found" |
+| 403 | "Not authorized to update this address" |
+
+---
+
+## Address Features
+
+### Automatic Default Management
+- First address is automatically set as default
+- Only one address can be default at a time
+- Deleting default address auto-assigns new default
+
+### Geolocation Support
+- Stores coordinates in GeoJSON format `[longitude, latitude]`
+- 2dsphere index for location-based queries
+- Optional latitude/longitude fields
+
+### Validation
+- Indian phone format: 10 digits starting with 6-9 (accepts `+91` prefix with optional space)
+  - Valid: `9876543210`, `+919876543210`, `+91 9876543210`
+  - All formats normalized to `9876543210` in database
+- Indian PIN code: 6 digits
+- Coordinates validated for valid ranges
+
+---
+
 ## Health Check
 
 ```

@@ -12,7 +12,9 @@ const adminAuthRoutes = require('./routes/adminAuthRoutes');
 const productRoutes = require('./routes/productRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const cartRoutes = require('./routes/cartRoutes');
+const addressRoutes = require('./routes/addressRoutes');
 const bulkUploadRoutes = require('./routes/bulkUploadRoutes');
+const orderRoutes = require('./routes/orderRoutes');
 const AppError = require('./utils/AppError');
 
 const {
@@ -134,6 +136,12 @@ app.use('/api/v1/upload', uploadRoutes);
 
 // Shopping Cart (Buyer)
 app.use('/api/v1/cart', cartRoutes);
+
+// Address Management (Buyer)
+app.use('/api/v1/addresses', addressRoutes);
+
+// Orders & Payments (Buyer)
+app.use('/api/v1/orders', orderRoutes);
 
 // Bulk Product Upload (Admin)
 app.use('/api/v1/products/bulk', bulkUploadRoutes);
