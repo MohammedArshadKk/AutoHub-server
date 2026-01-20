@@ -2,22 +2,50 @@ const mongoose = require('mongoose');
 
 const productSchema = new mongoose.Schema(
     {
-        // Basic Product Info
+        // ==================== PART REFERENCE ==================== //
+        // Reference to Part (Master Catalog)
+        part: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Part',
+            required: [true, 'Part reference is required'],
+            index: true,
+        },
+
+        // ==================== PRODUCT-SPECIFIC INFO ==================== //
+        // These fields override or supplement part details
+
+        // Product name (optional - inherited from Part if not provided)
         name: {
             type: String,
-            required: [true, 'Product name is required'],
             trim: true,
             maxlength: [200, 'Product name cannot exceed 200 characters'],
         },
         description: {
             type: String,
-            required: [true, 'Product description is required'],
             maxlength: [5000, 'Description cannot exceed 5000 characters'],
         },
         partNumber: {
             type: String,
             trim: true,
             uppercase: true,
+        },
+
+        // Feature Points / Bullet Points
+        features: {
+            type: [String],
+            validate: {
+                validator: function (v) {
+                    return v.length <= 20;
+                },
+                message: 'Maximum 20 feature points allowed',
+            },
+            default: [],
+        },
+
+        // Seller/Admin Remarks
+        remarks: {
+            type: String,
+            maxlength: [1000, 'Remarks cannot exceed 1000 characters'],
         },
 
         // Images (optional - can be added later)
@@ -33,10 +61,10 @@ const productSchema = new mongoose.Schema(
             default: [],
         },
 
-        // Pricing
+        // Pricing (REQUIRED for products)
         price: {
             type: Number,
-            required: [true, 'Price is required'],
+            required: [true, 'Price is required for product listing'],
             min: [0, 'Price cannot be negative'],
         },
         originalPrice: {
@@ -75,10 +103,9 @@ const productSchema = new mongoose.Schema(
             },
         ],
 
-        // Part Category
+        // Category (optional - inherited from Part)
         category: {
             type: String,
-            required: [true, 'Category is required'],
             enum: {
                 values: [
                     'Engine',
@@ -106,22 +133,23 @@ const productSchema = new mongoose.Schema(
             trim: true,
         },
 
-        // Condition
+        // Condition (REQUIRED for products)
         condition: {
             type: String,
-            required: [true, 'Condition is required'],
+            required: [true, 'Condition is required for product listing'],
             enum: {
                 values: ['New', 'Refurbished', 'Used - Like New', 'Used - Good', 'Used - Fair'],
                 message: 'Invalid condition',
             },
+            default: 'New',
         },
 
-        // Stock
+        // Stock (REQUIRED for products)
         stock: {
             type: Number,
-            required: [true, 'Stock quantity is required'],
+            required: [true, 'Stock is required for product listing'],
             min: [0, 'Stock cannot be negative'],
-            default: 1,
+            default: 0,
         },
 
         // Approval Status (Admin workflow)
@@ -145,10 +173,16 @@ const productSchema = new mongoose.Schema(
             ref: 'User',
         },
 
-        // Seller Reference (optional - null for admin products)
+        // ==================== OWNERSHIP ==================== //
+        // Either seller OR admin (at least one must be set)
         seller: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Seller',
+            default: null,
+        },
+        admin: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Admin',
             default: null,
         },
 
@@ -158,7 +192,7 @@ const productSchema = new mongoose.Schema(
             of: String,
         },
 
-        // Additional Info
+        // Brand (optional - inherited from Part)
         brand: {
             type: String,
             trim: true,
@@ -223,8 +257,10 @@ const productSchema = new mongoose.Schema(
 
 // Indexes for search and filtering
 productSchema.index({ name: 'text', description: 'text', tags: 'text' });
+productSchema.index({ part: 1, status: 1 }); // NEW: Search products by part
 productSchema.index({ status: 1, isDeleted: 1 });
-productSchema.index({ seller: 1, status: 1 });
+productSchema.index({ seller: 1, status: 1 }); // Seller's products
+productSchema.index({ admin: 1, status: 1 }); // NEW: Admin's products
 productSchema.index({ category: 1, status: 1 });
 productSchema.index({ 'compatibleVehicles.make': 1, 'compatibleVehicles.model': 1 });
 productSchema.index({ price: 1 });
@@ -241,6 +277,14 @@ productSchema.virtual('discountPercent').get(function () {
 // Virtual for in-stock status
 productSchema.virtual('inStock').get(function () {
     return this.stock > 0;
+});
+
+// Pre-save: Validate ownership (must have seller OR admin)
+productSchema.pre('save', function (next) {
+    if (!this.seller && !this.admin) {
+        return next(new Error('Product must have either a seller or admin reference'));
+    }
+    next();
 });
 
 // Pre-save: Generate slug
