@@ -20,7 +20,27 @@ const bulkPartSchema = Joi.object({
         'Body', 'Interior', 'Exterior', 'Exhaust', 'Cooling',
         'Fuel System', 'Steering', 'Wheels & Tires', 'Lighting', 'HVAC', 'Other'
     ).required(),
-    brand: Joi.string().trim().min(1).max(100).required(),
+
+    brand: Joi.array()
+        .items(Joi.string().trim().min(1).max(100))
+        .min(1)
+        .max(10)
+        .required()
+        .messages({
+            'array.base': 'Brand must be an array',
+            'array.min': 'At least one brand is required',
+            'array.max': 'Maximum 10 brands allowed',
+        }),
+
+    partNumbers: Joi.array()
+        .items(Joi.string().trim().uppercase().max(50))
+        .max(20)
+        .optional()
+        .default([])
+        .messages({
+            'array.max': 'Maximum 20 part numbers allowed',
+        }),
+
     compatibleVehicles: Joi.array().items(bulkVehicleSchema).min(1).required(),
     partNumber: Joi.string().trim().uppercase().max(50).optional().allow(''),
     defaultImageUrl: Joi.string().uri().optional().allow(''),
@@ -79,15 +99,27 @@ exports.bulkCreateParts = catchAsync(async (req, res, next) => {
                 continue;
             }
 
-            // Add admin reference and auto-approve
+            // Add admin reference
             value.createdBy = req.admin.id;
-            value.status = 'ACTIVE';
 
             // Sanitize text fields
             if (value.partName) value.partName = value.partName.trim();
             if (value.description) value.description = value.description.trim();
             if (value.partNumber) value.partNumber = value.partNumber.trim().toUpperCase();
-            if (value.brand) value.brand = value.brand.trim();
+
+            // Sanitize brand array (trim each brand name)
+            if (value.brand && Array.isArray(value.brand)) {
+                value.brand = value.brand
+                    .map(b => b.trim())
+                    .filter(b => b.length > 0);
+            }
+
+            // Sanitize partNumbers array (trim and uppercase each part number)
+            if (value.partNumbers && Array.isArray(value.partNumbers)) {
+                value.partNumbers = value.partNumbers
+                    .map(pn => pn.trim().toUpperCase())
+                    .filter(pn => pn.length > 0);
+            }
 
             // Create part
             const part = await Part.create(value);

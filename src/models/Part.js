@@ -123,28 +123,28 @@ const partSchema = new mongoose.Schema(
             of: String,
         },
 
-        weight: {
-            value: Number,
-            unit: {
-                type: String,
-                enum: ['kg', 'g', 'lbs'],
-                default: 'kg',
-            },
-        },
-        dimensions: {
-            length: Number,
-            width: Number,
-            height: Number,
-            unit: {
-                type: String,
-                enum: ['cm', 'in', 'm'],
-                default: 'cm',
-            },
-        },
-        warranty: {
-            type: String,
-            maxlength: 200,
-        },
+        // weight: {
+        //     value: Number,
+        //     unit: {
+        //         type: String,
+        //         enum: ['kg', 'g', 'lbs'],
+        //         default: 'kg',
+        //     },
+        // },
+        // dimensions: {
+        //     length: Number,
+        //     width: Number,
+        //     height: Number,
+        //     unit: {
+        //         type: String,
+        //         enum: ['cm', 'in', 'm'],
+        //         default: 'cm',
+        //     },
+        // },
+        // warranty: {
+        //     type: String,
+        //     maxlength: 200,
+        // },
 
         tags: [String],
         slug: {
