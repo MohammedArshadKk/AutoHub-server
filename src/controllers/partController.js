@@ -195,7 +195,6 @@ exports.createPart = catchAsync(async (req, res, next) => {
 exports.updatePart = catchAsync(async (req, res, next) => {
     const { id } = req.params;
 
-    // Validate ObjectId format
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
         return next(AppError.badRequest('Invalid part ID format'));
     }
@@ -206,30 +205,23 @@ exports.updatePart = catchAsync(async (req, res, next) => {
         return next(AppError.notFound('Part not found'));
     }
 
-    // Extract validated update data
+    // Extract update data
     const updateData = { ...req.body };
 
-    // Trim text fields if present
+    // Standard Sanitization
     if (updateData.partName) updateData.partName = updateData.partName.trim();
     if (updateData.description) updateData.description = updateData.description.trim();
     if (updateData.partNumber) updateData.partNumber = updateData.partNumber.trim().toUpperCase();
 
-    // Sanitize brand array (trim each brand name)
     if (updateData.brand && Array.isArray(updateData.brand)) {
-        updateData.brand = updateData.brand
-            .map(b => b.trim())
-            .filter(b => b.length > 0);
+        updateData.brand = updateData.brand.map(b => b.trim()).filter(b => b.length > 0);
     }
 
-    // Sanitize partNumbers array (trim and uppercase each part number)
     if (updateData.partNumbers && Array.isArray(updateData.partNumbers)) {
-        updateData.partNumbers = updateData.partNumbers
-            .map(pn => pn.trim().toUpperCase())
-            .filter(pn => pn.length > 0);
+        updateData.partNumbers = updateData.partNumbers.map(pn => pn.trim().toUpperCase()).filter(pn => pn.length > 0);
     }
 
-
-
+    // Perform Update
     const updatedPart = await Part.findByIdAndUpdate(id, updateData, {
         new: true,
         runValidators: true,
@@ -237,7 +229,7 @@ exports.updatePart = catchAsync(async (req, res, next) => {
 
     res.status(200).json({
         status: 'success',
-        message: 'Part updated successfully',
+        message: 'Global part record updated successfully',
         data: {
             part: updatedPart,
         },
@@ -252,7 +244,6 @@ exports.updatePart = catchAsync(async (req, res, next) => {
 exports.deletePart = catchAsync(async (req, res, next) => {
     const { id } = req.params;
 
-    // Validate ObjectId format
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
         return next(AppError.badRequest('Invalid part ID format'));
     }
@@ -260,16 +251,29 @@ exports.deletePart = catchAsync(async (req, res, next) => {
     const part = await Part.findById(id);
 
     if (!part || part.isDeleted) {
-        return next(AppError.notFound('Part not found'));
+        return next(AppError.notFound('Part not found or already deleted'));
     }
 
-    // Soft delete
+    // Perform Soft Delete on Part
     part.isDeleted = true;
     await part.save();
 
+    // =========== CASCADE: ARCHIVE ASSOCIATED PRODUCTS ===========
+    // When a global part is deleted, all seller listings for it should be archived
+    const Product = mongoose.model('Product'); // Late import if needed, but it's usually globally available or required at top
+
+    // Set all matching products to isDeleted: true and status: ARCHIVED
+    await Product.updateMany(
+        { part: id, isDeleted: false },
+        {
+            isDeleted: true,
+            status: 'ARCHIVED'
+        }
+    );
+
     res.status(200).json({
         status: 'success',
-        message: 'Part deleted successfully',
+        message: 'Part deleted and all associated seller product listings have been archived',
     });
 });
 
@@ -284,6 +288,12 @@ exports.getAllPartsAdmin = catchAsync(async (req, res, next) => {
         limit = 20,
         category,
         brand,
+        make,
+        model,
+        year,
+        minPrice,
+        maxPrice,
+        inStock,
         search,
         sort = '-createdAt',
     } = req.query;
@@ -291,17 +301,40 @@ exports.getAllPartsAdmin = catchAsync(async (req, res, next) => {
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
 
-    // Build query - admin can see all parts including deleted
+    // Build query - admin can see all parts including archived
     const query = {};
 
-    // Category filter
-    if (category) {
-        query.category = category;
-    }
+    // Basic filters
+    if (category) query.category = category;
 
-    // Brand filter
     if (brand) {
         query.brand = { $regex: new RegExp(escapeRegex(brand), 'i') };
+    }
+
+    // Vehicle compatibility filters
+    if (make || model || year) {
+        const vehicleQuery = {};
+        if (make) vehicleQuery.make = { $regex: new RegExp(escapeRegex(make), 'i') };
+        if (model) vehicleQuery.model = { $regex: new RegExp(escapeRegex(model), 'i') };
+        if (year) vehicleQuery.year = parseInt(year, 10);
+
+        query.compatibleVehicles = { $elemMatch: vehicleQuery };
+    }
+
+    // Price range filters
+    if (minPrice !== undefined || maxPrice !== undefined) {
+        query.price = {};
+        if (minPrice !== undefined) query.price.$gte = Number(minPrice);
+        if (maxPrice !== undefined) query.price.$lte = Number(maxPrice);
+    }
+
+    // Stock availability filter
+    if (inStock !== undefined) {
+        if (inStock === 'true' || inStock === true) {
+            query.stock = { $gt: 0 };
+        } else {
+            query.stock = 0;
+        }
     }
 
     // Text search
@@ -311,6 +344,7 @@ exports.getAllPartsAdmin = catchAsync(async (req, res, next) => {
             { partName: { $regex: new RegExp(escapedSearch, 'i') } },
             { partNumber: { $regex: new RegExp(escapedSearch, 'i') } },
             { brand: { $regex: new RegExp(escapedSearch, 'i') } },
+            { partNumbers: { $regex: new RegExp(escapedSearch, 'i') } },
         ];
     }
 
@@ -321,7 +355,7 @@ exports.getAllPartsAdmin = catchAsync(async (req, res, next) => {
             .sort(sort)
             .skip(skip)
             .limit(limitNum)
-            .select('partName images price stock createdAt views soldCount brand category isDeleted')
+            .select('partName partNumber partNumbers images price stock brand category isDeleted createdAt')
             .populate('createdBy', 'name email')
             .lean(),
         Part.countDocuments(query),
@@ -341,3 +375,4 @@ exports.getAllPartsAdmin = catchAsync(async (req, res, next) => {
         },
     });
 });
+

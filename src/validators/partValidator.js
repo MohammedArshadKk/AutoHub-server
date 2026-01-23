@@ -297,10 +297,10 @@ const updatePartSchema = Joi.object({
         .optional()
         .allow(''),
 
-    brand: Joi.string()
-        .trim()
+    brand: Joi.array()
+        .items(Joi.string().trim().min(1).max(100))
         .min(1)
-        .max(100)
+        .max(10)
         .optional(),
 
     stock: Joi.number()
