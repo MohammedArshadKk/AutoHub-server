@@ -10,6 +10,8 @@ const authRoutes = require('./routes/authRoutes');
 const sellerAuthRoutes = require('./routes/sellerAuthRoutes');
 const adminAuthRoutes = require('./routes/adminAuthRoutes');
 const productRoutes = require('./routes/productRoutes');
+const partRoutes = require('./routes/partRoutes');
+const sellerRoutes = require('./routes/sellerRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const cartRoutes = require('./routes/cartRoutes');
 const addressRoutes = require('./routes/addressRoutes');
@@ -74,8 +76,15 @@ const corsOptions = {
         if (!origin) return callback(null, true);
 
         const allowedOrigins = env.isProduction
-            ? [env.frontendUrl]
-            : [env.frontendUrl, 'http://localhost:3000', 'http://localhost:5173'];
+            ? [env.frontendUrl, env.adminFrontendUrl, env.sellerFrontendUrl]
+            : [
+                env.frontendUrl,
+                env.adminFrontendUrl,
+                env.sellerFrontendUrl,
+                'http://localhost:3000',
+                'http://localhost:3001', // Seller frontend
+                'http://localhost:5173'
+            ];
 
         if (allowedOrigins.includes(origin)) {
             callback(null, true);
@@ -130,6 +139,12 @@ app.use('/api/v1/admin/auth', adminAuthRoutes);
 
 // Products
 app.use('/api/v1/products', productRoutes);
+
+// Parts (Admin-managed automotive parts)
+app.use('/api/v1/parts', partRoutes);
+
+// Sellers (Admin-managed seller accounts)
+app.use('/api/v1/sellers', sellerRoutes);
 
 // Upload (S3 pre-signed URLs)
 app.use('/api/v1/upload', uploadRoutes);

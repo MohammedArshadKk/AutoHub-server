@@ -175,9 +175,14 @@ const partSchema = new mongoose.Schema(
 
 // Indexes for search and filtering
 partSchema.index({ partName: 'text', description: 'text', tags: 'text' });
-partSchema.index({ status: 1, isDeleted: 1 });
+partSchema.index({ isDeleted: 1 });
 partSchema.index({ category: 1, brand: 1 });
 partSchema.index({ 'compatibleVehicles.make': 1, 'compatibleVehicles.model': 1 });
+
+// Compound indexes for advanced filtering (production-ready)
+partSchema.index({ category: 1, 'compatibleVehicles.make': 1, 'compatibleVehicles.model': 1 });
+partSchema.index({ category: 1, brand: 1 });
+partSchema.index({ 'compatibleVehicles.year': 1, 'compatibleVehicles.make': 1, 'compatibleVehicles.model': 1 });
 partSchema.index({ 'compatibleVehicles.year': 1 });
 partSchema.index({ price: 1 });
 partSchema.index({ createdAt: -1 });
@@ -210,13 +215,12 @@ partSchema.pre('save', function (next) {
 
 // Static: Find active parts only
 partSchema.statics.findActive = function (filter = {}) {
-    return this.find({ ...filter, status: 'ACTIVE', isDeleted: false });
+    return this.find({ ...filter, isDeleted: false });
 };
 
 // Static: Find by vehicle compatibility
 partSchema.statics.findByVehicle = function (year, make, model) {
     return this.find({
-        status: 'ACTIVE',
         isDeleted: false,
         compatibleVehicles: {
             $elemMatch: {
@@ -230,7 +234,6 @@ partSchema.statics.findByVehicle = function (year, make, model) {
 
 // Method: Archive part
 partSchema.methods.archive = async function () {
-    this.status = 'ARCHIVED';
     this.isDeleted = true;
     return this.save();
 };

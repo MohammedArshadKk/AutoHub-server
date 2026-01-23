@@ -134,6 +134,10 @@ const config = {
     return process.env.ADMIN_FRONTEND_URL || 'http://localhost:5000';
   },
 
+  get sellerFrontendUrl() {
+    return process.env.SELLER_FRONTEND_URL || 'http://localhost:3001';
+  },
+
   get frontendUrl() {
     // Legacy support - defaults to buyer frontend
     return process.env.FRONTEND_URL || this.buyerFrontendUrl;

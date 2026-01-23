@@ -2,19 +2,12 @@ const mongoose = require('mongoose');
 
 const productSchema = new mongoose.Schema(
     {
-        // ==================== PART REFERENCE ==================== //
-        // Reference to Part (Master Catalog)
         part: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Part',
             required: [true, 'Part reference is required'],
             index: true,
         },
-
-        // ==================== PRODUCT-SPECIFIC INFO ==================== //
-        // These fields override or supplement part details
-
-        // Product name (optional - inherited from Part if not provided)
         name: {
             type: String,
             trim: true,
@@ -138,7 +131,7 @@ const productSchema = new mongoose.Schema(
             type: String,
             required: [true, 'Condition is required for product listing'],
             enum: {
-                values: ['New', 'Refurbished', 'Used - Like New', 'Used - Good', 'Used - Fair'],
+                values: ['New', 'NEW', 'Refurbished', 'Used - Like New', 'Used - Good', 'Used - Fair'],
                 message: 'Invalid condition',
             },
             default: 'New',
@@ -173,8 +166,6 @@ const productSchema = new mongoose.Schema(
             ref: 'User',
         },
 
-        // ==================== OWNERSHIP ==================== //
-        // Either seller OR admin (at least one must be set)
         seller: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Seller',
@@ -185,17 +176,22 @@ const productSchema = new mongoose.Schema(
             ref: 'Admin',
             default: null,
         },
-
-        // Specifications (dynamic key-value)
         specifications: {
             type: Map,
             of: String,
         },
 
-        // Brand (optional - inherited from Part)
         brand: {
             type: String,
             trim: true,
+        },
+        isCustomBrand: {
+            type: Boolean,
+            default: false,
+        },
+        isCustomPartNumber: {
+            type: Boolean,
+            default: false,
         },
         weight: {
             value: Number,

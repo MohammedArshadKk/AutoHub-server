@@ -2,6 +2,11 @@ const Part = require('../models/Part');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 
+// Utility function to escape regex special characters
+const escapeRegex = (str) => {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+};
+
 // ==================== PUBLIC ENDPOINTS ==================== //
 
 /**
@@ -30,7 +35,7 @@ exports.getParts = catchAsync(async (req, res, next) => {
     const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 20));
 
     // Build query - only active parts
-    const query = { status: 'ACTIVE', isDeleted: false };
+    const query = { isDeleted: false };
 
     // Category filter
     if (category) {
@@ -39,7 +44,7 @@ exports.getParts = catchAsync(async (req, res, next) => {
 
     // Brand filter
     if (brand) {
-        query.brand = { $regex: new RegExp(brand, 'i') };
+        query.brand = { $regex: new RegExp(escapeRegex(brand), 'i') };
     }
 
     // Price range filter
@@ -58,8 +63,8 @@ exports.getParts = catchAsync(async (req, res, next) => {
     if (make || model || year) {
         query.compatibleVehicles = { $elemMatch: {} };
         if (year) query.compatibleVehicles.$elemMatch.year = Number(year);
-        if (make) query.compatibleVehicles.$elemMatch.make = { $regex: new RegExp(make, 'i') };
-        if (model) query.compatibleVehicles.$elemMatch.model = { $regex: new RegExp(model, 'i') };
+        if (make) query.compatibleVehicles.$elemMatch.make = { $regex: new RegExp(escapeRegex(make), 'i') };
+        if (model) query.compatibleVehicles.$elemMatch.model = { $regex: new RegExp(escapeRegex(model), 'i') };
     }
 
     // Text search
@@ -118,15 +123,6 @@ exports.getPartById = catchAsync(async (req, res, next) => {
         .populate('createdBy', 'name email')
         .lean();
 
-    if (!part) {
-        return next(AppError.notFound('Part not found'));
-    }
-
-    // Only show active parts to public
-    if (part.status !== 'ACTIVE') {
-        return next(AppError.notFound('Part not found'));
-    }
-
     // Increment view count asynchronously (fire and forget)
     Part.findByIdAndUpdate(id, { $inc: { views: 1 } }).exec().catch(() => { });
 
@@ -149,9 +145,8 @@ exports.createPart = catchAsync(async (req, res, next) => {
     // Extract validated data from request body
     const partData = { ...req.body };
 
-    // Set admin reference and status
+    // Set admin reference
     partData.createdBy = req.admin.id;
-    partData.status = 'ACTIVE'; // Parts created by admin are auto-approved
 
     // Trim and sanitize text fields
     if (partData.partName) {
@@ -209,11 +204,6 @@ exports.updatePart = catchAsync(async (req, res, next) => {
 
     if (!part || part.isDeleted) {
         return next(AppError.notFound('Part not found'));
-    }
-
-    // Cannot update archived parts
-    if (part.status === 'ARCHIVED') {
-        return next(AppError.badRequest('Cannot update archived parts'));
     }
 
     // Extract validated update data
@@ -275,7 +265,6 @@ exports.deletePart = catchAsync(async (req, res, next) => {
 
     // Soft delete
     part.isDeleted = true;
-    part.status = 'ARCHIVED';
     await part.save();
 
     res.status(200).json({
@@ -293,7 +282,6 @@ exports.getAllPartsAdmin = catchAsync(async (req, res, next) => {
     const {
         page = 1,
         limit = 20,
-        status,
         category,
         brand,
         search,
@@ -306,11 +294,6 @@ exports.getAllPartsAdmin = catchAsync(async (req, res, next) => {
     // Build query - admin can see all parts including deleted
     const query = {};
 
-    // Status filter
-    if (status && ['DRAFT', 'ACTIVE', 'ARCHIVED'].includes(status)) {
-        query.status = status;
-    }
-
     // Category filter
     if (category) {
         query.category = category;
@@ -318,39 +301,31 @@ exports.getAllPartsAdmin = catchAsync(async (req, res, next) => {
 
     // Brand filter
     if (brand) {
-        query.brand = { $regex: new RegExp(brand, 'i') };
+        query.brand = { $regex: new RegExp(escapeRegex(brand), 'i') };
     }
 
     // Text search
     if (search && search.trim()) {
+        const escapedSearch = escapeRegex(search.trim());
         query.$or = [
-            { partName: { $regex: new RegExp(search.trim(), 'i') } },
-            { partNumber: { $regex: new RegExp(search.trim(), 'i') } },
-            { brand: { $regex: new RegExp(search.trim(), 'i') } },
+            { partName: { $regex: new RegExp(escapedSearch, 'i') } },
+            { partNumber: { $regex: new RegExp(escapedSearch, 'i') } },
+            { brand: { $regex: new RegExp(escapedSearch, 'i') } },
         ];
     }
 
     const skip = (pageNum - 1) * limitNum;
 
-    const [parts, total, statusCounts] = await Promise.all([
+    const [parts, total] = await Promise.all([
         Part.find(query)
             .sort(sort)
             .skip(skip)
             .limit(limitNum)
-            .select('partName images price stock status createdAt views soldCount brand category isDeleted')
+            .select('partName images price stock createdAt views soldCount brand category isDeleted')
             .populate('createdBy', 'name email')
             .lean(),
         Part.countDocuments(query),
-        Part.aggregate([
-            { $group: { _id: '$status', count: { $sum: 1 } } },
-        ]),
     ]);
-
-    // Format status counts
-    const counts = statusCounts.reduce((acc, item) => {
-        acc[item._id] = item.count;
-        return acc;
-    }, {});
 
     res.status(200).json({
         status: 'success',
@@ -361,7 +336,6 @@ exports.getAllPartsAdmin = catchAsync(async (req, res, next) => {
             total,
             pages: Math.ceil(total / limitNum),
         },
-        statusCounts: counts,
         data: {
             parts,
         },

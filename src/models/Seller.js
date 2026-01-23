@@ -69,6 +69,24 @@ const sellerSchema = new mongoose.Schema(
             country: { type: String, default: 'India' },
         },
 
+        // Location (Google Maps)
+        location: {
+            googleMapsUrl: {
+                type: String,
+                trim: true,
+            },
+            latitude: {
+                type: Number,
+                min: -90,
+                max: 90,
+            },
+            longitude: {
+                type: Number,
+                min: -180,
+                max: 180,
+            },
+        },
+
         // KYC / Verification Documents
         kyc: {
             idType: {

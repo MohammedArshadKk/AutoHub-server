@@ -38,8 +38,8 @@ const adminSchema = new mongoose.Schema(
         },
         permissions: {
             type: [String],
-            default: ['products', 'orders', 'sellers'],
-            enum: ['products', 'orders', 'sellers', 'users', 'payouts', 'settings'],
+            default: ['products', 'parts', 'orders', 'sellers'],
+            enum: ['products', 'parts', 'orders', 'sellers', 'users', 'payouts', 'settings'],
         },
         isActive: {
             type: Boolean,

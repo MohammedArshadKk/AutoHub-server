@@ -104,13 +104,89 @@ const orderSchema = new mongoose.Schema(
         },
         paymentStatus: {
             type: String,
-            enum: ['pending_payment', 'pending', 'paid', 'failed'],
+            enum: ['pending_payment', 'pending', 'paid', 'failed', 'refunded', 'partially_refunded'],
             default: 'pending',
         },
 
-        // Razorpay payment details
-        razorpayOrderId: String,
-        razorpayPaymentId: String,
+        // ==================== PAYMENT GATEWAY DETAILS ====================
+
+        // Razorpay IDs
+        razorpayOrderId: {
+            type: String,
+            index: true,
+        },
+        razorpayPaymentId: {
+            type: String,
+            index: true,
+        },
+        razorpaySignature: String, // Store signature for audit trail
+
+        // Transaction Details
+        transactionId: {
+            type: String,
+            index: true,
+        }, // Bank/UPI transaction ID
+
+        // Payment Method Details (from Razorpay payment object)
+        paymentDetails: {
+            method: String, // 'card', 'upi', 'netbanking', 'wallet'
+
+            // Card details (if payment via card)
+            card: {
+                type: String, // 'credit', 'debit'
+                network: String, // 'Visa', 'MasterCard', 'RuPay'
+                last4: String, // Last 4 digits
+                name: String, // Cardholder name
+                issuer: String, // Bank name
+                emi: Boolean, // EMI used or not
+            },
+
+            // UPI details (if payment via UPI)
+            upi: {
+                vpa: String, // Virtual Payment Address (e.g., user@paytm)
+            },
+
+            // Netbanking details
+            bank: String, // Bank name for netbanking/card
+
+            // Wallet details
+            wallet: String, // 'paytm', 'phonepe', 'amazonpay', etc.
+        },
+
+        // Payment Response (Full Razorpay payment object for audit)
+        paymentGatewayResponse: {
+            type: mongoose.Schema.Types.Mixed,
+            select: false, // Don't return by default (contains sensitive data)
+        },
+
+        // Payment Timestamps
+        paymentInitiatedAt: Date,
+        paymentCompletedAt: Date,
+        paymentFailedAt: Date,
+
+        // Refund Details
+        refund: {
+            initiated: { type: Boolean, default: false },
+            refundId: String, // Razorpay refund ID
+            amount: Number, // Refund amount (can be partial)
+            status: {
+                type: String,
+                enum: ['pending', 'processing', 'processed', 'failed'],
+            },
+            reason: String,
+            initiatedAt: Date,
+            processedAt: Date,
+            transactionId: String, // Refund transaction ID
+        },
+
+        // Payment Attempts (for tracking failed payments)
+        paymentAttempts: [{
+            attemptedAt: { type: Date, default: Date.now },
+            paymentId: String,
+            status: String, // 'failed', 'cancelled', 'timeout'
+            errorCode: String,
+            errorDescription: String,
+        }],
 
         // Order status workflow
         orderStatus: {

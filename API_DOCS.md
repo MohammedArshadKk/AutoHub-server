@@ -521,6 +521,429 @@ POST /products/bulk
 
 ---
 
+## Parts - Public
+
+Parts are automotive components managed by admins. Unlike products (which can be created by sellers), parts are admin-only and pre-approved.
+
+### Get All Parts
+```
+GET /parts
+```
+**Query Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| page | number | Page number (default: 1) |
+| limit | number | Items per page (max: 50, default: 20) |
+| category | string | Filter by category |
+| brand | string | Filter by brand  (case-insensitive) |
+| minPrice | number | Minimum price |
+| maxPrice | number | Maximum price |
+| make | string | Filter by vehicle make (case-insensitive) |
+| model | string | Filter by vehicle model (case-insensitive) |
+| year | number | Filter by vehicle year |
+| search | string | Text search on part name and description |
+| inStock | boolean | Only in-stock items |
+| sort | string | Sort field (options: createdAt, -createdAt, price, -price, partName, -partName, default: -createdAt) |
+
+**Response:**
+```json
+{
+  "status": "success",
+  "results": 15,
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 15,
+    "pages": 1,
+    "hasNext": false,
+    "hasPrev": false
+  },
+  "data": {
+    "parts": [
+      {
+        "_id": "65f8a1b2c3d4e5f6a7b8c9d0",
+        "partName": "Premium Brake Pad Set",
+        "description": "High-performance ceramic brake pads...",
+        "partNumber": "BP-CERAMIC-2024",
+        "category": "Brakes",
+        "brand": "Brembo",
+        "price": 2500,
+        "originalPrice": 3000,
+        "stock": 50,
+        "images": ["https://..."],
+        "compatibleVehicles": [
+          {
+            "year": 2020,
+            "make": "Toyota",
+            "model": "Camry",
+            "variant": "LE"
+          }
+        ],
+        "status": "ACTIVE",
+        "views": 145,
+        "createdAt": "2026-01-19T12:00:00.000Z",
+        "updatedAt": "2026-01-19T12:00:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+### Get Single Part
+```
+GET /parts/:id
+```
+**Response:**
+```json
+{
+  "status": "success",
+  "data": {
+    "part": {
+      "_id": "65f8a1b2c3d4e5f6a7b8c9d0",
+      "partName": "Premium Brake Pad Set",
+      "description": "High-performance ceramic brake pads designed for superior stopping power...",
+      "partNumber": "BP-CERAMIC-2024",
+      "category": "Brakes",
+      "brand": "Brembo",
+      "price": 2500,
+      "originalPrice": 3000,
+      "stock": 50,
+      "images": ["https://..."],
+      "compatibleVehicles": [
+        {
+          "year": 2020,
+          "make": "Toyota",
+          "model": "Camry",
+          "variant": "LE"
+        },
+        {
+          "year": 2021,
+          "make": "Toyota",
+          "model": "Camry",
+          "variant": "SE"
+        }
+      ],
+      "specifications": {
+        "Material": "Ceramic",
+        "Position": "Front",
+        "Warranty": "2 Years"
+      },
+      "tags": ["brake", "ceramic", "toyota", "safety"],
+      "status": "ACTIVE",
+      "views": 146,
+      "soldCount": 5,
+      "createdBy": {
+        "_id": "65f8a000000000000000001",
+        "name": "Admin User",
+        "email": "admin@autohub.com"
+      },
+      "createdAt": "2026-01-19T12:00:00.000Z",
+      "updatedAt": "2026-01-19T18:00:00.000Z"
+    }
+  }
+}
+```
+
+---
+
+## Parts - Admin
+
+All admin part endpoints require authentication and 'parts' permission.
+
+### Get All Parts (Admin View)
+```
+GET /parts/admin/all
+```
+**Requires:** Admin with 'parts' permission
+
+**Query Parameters:** Same as public GET /parts, plus:
+- `status` - Filter by status (DRAFT, ACTIVE, ARCHIVED)
+
+**Note:** Admin can see all parts including deleted ones.
+
+**Response:**
+```json
+{
+  "status": "success",
+  "results": 25,
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 25,
+    "pages": 2
+  },
+  "statusCounts": {
+    "ACTIVE": 20,
+    "DRAFT": 3,
+    "ARCHIVED": 2
+  },
+  "data": {
+    "parts": [...]
+  }
+}
+```
+
+### Create Part
+```
+POST /parts/admin
+```
+**Requires:** Admin with 'parts' permission
+
+**Body:**
+```json
+{
+  "partName": "Premium Brake Pad Set",
+  "description": "High-performance ceramic brake pads designed for superior stopping power and reduced brake dust. Compatible with multiple vehicle models.",
+  "partNumber": "BP-CERAMIC-2024",
+  "category": "Brakes",
+  "brand": "Brembo",
+  "compatibleVehicles": [
+    {
+      "year": 2020,
+      "make": "Toyota",
+      "model": "Camry",
+      "variant": "LE"
+    }
+  ],
+  "price": 2500,
+  "originalPrice": 3000,
+  "stock": 50,
+  "defaultImageUrl": "https://auto-hub-storage.s3.ap-south-1.amazonaws.com/parts/brake-pad-default.jpg",
+  "specifications": {
+    "Material": "Ceramic",
+    "Position": "Front",
+    "Warranty": "2 Years"
+  },
+  "tags": ["brake", "ceramic", "toyota", "safety"],
+  "weight": {
+    "value": 2.5,
+    "unit": "kg"
+  },
+  "dimensions": {
+    "length": 25,
+    "width": 15,
+    "height": 5,
+    "unit": "cm"
+  },
+  "warranty": "2 Years or 50,000 km"
+}
+```
+
+**Required Fields:**
+- `partName` (3-200 characters)
+- `description` (20-5000 characters)
+- `category` (must be valid from enum)
+- `brand` (required)
+- `compatibleVehicles` (array, minimum 1 vehicle with year, make, model)
+
+**Optional Fields:**
+- `partNumber` (unique, uppercase)
+- `subCategory`
+- `defaultImageUrl` (URL, single image for the part - defaults to placeholder)
+- `price`, `originalPrice`, `currency`
+- `stock`
+- `specifications` (key-value map)
+- `weight`, `dimensions`, `warranty`
+- `tags` (array, max 20 tags)
+- `isFeatured` (boolean)
+
+**Response:** `201 Created`
+```json
+{
+  "status": "success",
+  "message": "Part created successfully",
+  "data": {
+    "part": {
+      "_id": "65f8a1b2c3d4e5f6a7b8c9d0",
+      "partName": "Premium Brake Pad Set",
+      "status": "ACTIVE",
+      "createdBy": "65f8a000000000000000001",
+      ...
+    }
+  }
+}
+```
+
+**Validation Errors:** `400 Bad Request`
+```json
+{
+  "status": "error",
+  "message": "Validation failed",
+  "errors": [
+    "Part name must be at least 3 characters",
+    "At least one compatible vehicle is required"
+  ]
+}
+```
+
+### Update Part
+```
+PATCH /parts/admin/:id
+```
+**Requires:** Admin with 'parts' permission
+
+**Body:** Any fields from create part (all optional)
+
+**Response:** `200 OK`
+```json
+{
+  "status": "success",
+  "message": "Part updated successfully",
+  "data": {
+    "part": {...}
+  }
+}
+```
+
+**Errors:**
+- `400` - Invalid part ID format
+- `400` - Cannot update archived parts
+- `404` - Part not found
+
+### Delete Part (Soft Delete)
+```
+DELETE /parts/admin/:id
+```
+**Requires:** Admin with 'parts' permission
+
+**Description:** Soft deletes the part (sets isDeleted=true, status=ARCHIVED). Part will no longer appear in public listings.
+
+**Response:** `200 OK`
+```json
+{
+  "status": "success",
+  "message": "Part deleted successfully"
+}
+```
+
+### Bulk Upload Parts
+```
+POST /parts/bulk
+```
+**Requires:** Admin with 'parts' permission
+
+**Description:** Upload multiple parts at once from Excel/JSON. Maximum 100 parts per request.
+
+**Request Body:**
+```json
+{
+  "parts": [
+    {
+      "partName": "Brake Pad Set - Front",
+      "description": "High-performance ceramic brake pads for superior stopping power...",
+      "category": "Brakes",
+      "brand": "Brembo",
+      "compatibleVehicles": [
+        { "year": 2020, "make": "Toyota", "model": "Camry" }
+      ],
+      "price": 2500,
+      "stock": 50
+    },
+    {
+      "partName": "Oil Filter",
+      "description": "Premium oil filter with advanced filtration technology...",
+      "category": "Engine",
+      "brand": "Bosch",
+      "compatibleVehicles": [
+        { "year": 2019, "make": "Honda", "model": "Civic" }
+      ]
+    }
+  ]
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "success": true,
+  "message": "Bulk upload completed successfully",
+  "data": {
+    "total": 2,
+    "successCount": 2,
+    "failureCount": 0,
+    "results": [
+      {
+        "index": 0,
+        "success": true,
+        "partId": "679...",
+        "partName": "Brake Pad Set - Front"
+      },
+      {
+        "index": 1,
+        "success": true,
+        "partId": "679...",
+        "partName": "Oil Filter"
+      }
+    ]
+  }
+}
+```
+
+**Partial Success Response:**
+```json
+{
+  "success": true,
+  "message": "Bulk upload completed with some failures",
+  "data": {
+    "total": 3,
+    "successCount": 2,
+    "failureCount": 1,
+    "results": [
+      {
+        "index": 0,
+        "success": true,
+        "partId": "679..."
+      },
+      {
+        "index": 1,
+        "success": false,
+        "error": "Part name must be at least 3 characters",
+        "partName": "Unknown"
+      },
+      {
+        "index": 2,
+        "success": true,
+        "partId": "679..."
+      }
+    ]
+  }
+}
+```
+
+## Part Categories
+
+Same as Product Categories:
+| Category |
+|----------|
+| Engine |
+| Transmission |
+| Suspension |
+| Brakes |
+| Electrical |
+| Body |
+| Interior |
+| Exterior |
+| Exhaust |
+| Cooling |
+| Fuel System |
+| Steering |
+| Wheels & Tires |
+| Lighting |
+| HVAC |
+| Other |
+
+## Part vs Product
+
+| Feature | Parts | Products |
+|---------|-------|----------|
+| Created by | Admin only | Sellers or Admin |
+| Approval | Pre-approved (ACTIVE) | Requires admin approval |
+| Status Values | DRAFT, ACTIVE, ARCHIVED | DRAFT, PENDING_APPROVAL, ACTIVE, REJECTED, ARCHIVED |
+| Primary Use | Automotive parts catalog | Seller marketplace listings |
+| Required Fields | partName, description, category, brand, compatibleVehicles | name, description, category, price, images, compatibleVehicles |
+
+---
+
 ## Shopping Cart - Buyer
 
 All cart endpoints require buyer authentication via `accessToken` cookie.

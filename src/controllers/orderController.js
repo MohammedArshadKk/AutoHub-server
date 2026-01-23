@@ -216,8 +216,9 @@ exports.initiatePayment = catchAsync(async (req, res, next) => {
         order.orderNumber
     );
 
-    // Update order with Razorpay order ID
+    // Update order with Razorpay order ID and timestamp
     order.razorpayOrderId = razorpayOrder.id;
+    order.paymentInitiatedAt = new Date();
     await order.save();
 
     res.json({
@@ -273,19 +274,78 @@ exports.verifyPaymentAndUpdateOrder = catchAsync(async (req, res, next) => {
     const paymentDetails = await razorpayService.getPaymentDetails(razorpayPaymentId);
 
     if (paymentDetails.status !== 'captured') {
+        // Payment failed or not captured
         order.paymentStatus = 'failed';
         order.orderStatus = 'payment_failed';
+        order.paymentFailedAt = new Date();
+
+        // Record failed attempt
+        order.paymentAttempts.push({
+            attemptedAt: new Date(),
+            paymentId: razorpayPaymentId,
+            status: paymentDetails.status,
+            errorCode: paymentDetails.error_code,
+            errorDescription: paymentDetails.error_description,
+        });
+
         await order.save();
 
         return next(AppError.badRequest('Payment not captured. Please try again.'));
     }
 
-    // Payment successful - update order
+    // ========== PAYMENT SUCCESSFUL - EXTRACT DETAILS ==========
+
+    // Basic payment info
     order.paymentStatus = 'paid';
     order.orderStatus = 'confirmed';
     order.razorpayPaymentId = razorpayPaymentId;
+    order.razorpaySignature = razorpaySignature;
+    order.transactionId = paymentDetails.acquirer_data?.bank_transaction_id || paymentDetails.id;
+
+    // Timestamps
     order.paidAt = new Date();
     order.confirmedAt = new Date();
+    order.paymentCompletedAt = new Date(paymentDetails.created_at * 1000);
+
+    // Extract payment method details
+    const methodDetails = {};
+    methodDetails.method = paymentDetails.method; // 'card', 'upi', 'netbanking', 'wallet'
+
+    // Card details
+    if (paymentDetails.method === 'card' && paymentDetails.card) {
+        methodDetails.card = {
+            type: paymentDetails.card.type, // 'credit' or 'debit'
+            network: paymentDetails.card.network, // 'Visa', 'MasterCard', 'RuPay'
+            last4: paymentDetails.card.last4,
+            name: paymentDetails.card.name,
+            issuer: paymentDetails.card.issuer,
+            emi: paymentDetails.card.emi || false,
+        };
+        methodDetails.bank = paymentDetails.bank;
+    }
+
+    // UPI details
+    if (paymentDetails.method === 'upi' && paymentDetails.vpa) {
+        methodDetails.upi = {
+            vpa: paymentDetails.vpa, // user@paytm
+        };
+    }
+
+    // Netbanking details
+    if (paymentDetails.method === 'netbanking') {
+        methodDetails.bank = paymentDetails.bank;
+    }
+
+    // Wallet details
+    if (paymentDetails.method === 'wallet') {
+        methodDetails.wallet = paymentDetails.wallet;
+    }
+
+    order.paymentDetails = methodDetails;
+
+    // Store full payment response for audit (excluded from default queries)
+    order.paymentGatewayResponse = paymentDetails;
+
     await order.save();
 
     res.json({
@@ -298,6 +358,8 @@ exports.verifyPaymentAndUpdateOrder = catchAsync(async (req, res, next) => {
                 orderStatus: order.orderStatus,
                 paymentStatus: order.paymentStatus,
                 razorpayPaymentId: order.razorpayPaymentId,
+                transactionId: order.transactionId,
+                paymentMethod: order.paymentDetails?.method,
             },
         },
     });

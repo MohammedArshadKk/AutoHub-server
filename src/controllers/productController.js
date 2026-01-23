@@ -1,4 +1,5 @@
 const Product = require('../models/Product');
+const Part = require('../models/Part');
 const Seller = require('../models/Seller');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
@@ -291,38 +292,125 @@ exports.createProductSeller = catchAsync(async (req, res, next) => {
         return next(AppError.forbidden('Your account must be verified to list products'));
     }
 
-    // Sanitize input - only allow specific fields
-    const productData = sanitizeProductInput(req.body);
+    const {
+        partId,
+        title, // Maps to name
+        price,
+        originalPrice,
+        stock,
+        condition,
+        brand,
+        isCustomBrand,
+        partNumber,
+        isCustomPartNumber,
+        compatibleVehicles,
+        warrantyEnabled,
+        warranty,
+        keyPoints, // Maps to features
+        remarks,
+        images,
+    } = req.body;
 
-    // Validate required fields
-    const validationErrors = validateProductFields(productData);
-    if (validationErrors.length > 0) {
-        return next(AppError.badRequest(validationErrors.join('. ')));
+    // Validate Part ID
+    if (!partId) {
+        return next(AppError.badRequest('Part selection is required'));
     }
 
-    // Trim and sanitize text fields
-    productData.name = productData.name.trim();
-    productData.description = productData.description.trim();
-    if (productData.partNumber) {
-        productData.partNumber = productData.partNumber.trim().toUpperCase();
+    // Validate Part exists and is active
+    const part = await Part.findById(partId);
+    if (!part) {
+        return next(AppError.notFound('Selected part not found'));
+    }
+
+    if (part.isDeleted) {
+        return next(AppError.badRequest('Selected part is no longer available'));
+    }
+
+
+
+    // Validate required product fields
+    if (!price || price <= 0) {
+        return next(AppError.badRequest('Price must be greater than 0'));
+    }
+
+    if (stock === undefined || stock < 0) {
+        return next(AppError.badRequest('Stock quantity is required and cannot be negative'));
+    }
+
+    if (!images || !Array.isArray(images) || images.length === 0) {
+        return next(AppError.badRequest('At least one product image is required'));
+    }
+
+    if (images.length > 10) {
+        return next(AppError.badRequest('Maximum 10 images allowed'));
+    }
+
+    if (!condition) {
+        return next(AppError.badRequest('Product condition is required'));
     }
 
     // Validate price logic
-    if (productData.originalPrice && productData.originalPrice < productData.price) {
+    if (originalPrice && parseFloat(originalPrice) < parseFloat(price)) {
         return next(AppError.badRequest('Original price cannot be less than selling price'));
     }
 
-    // Validate stock
-    if (productData.stock !== undefined && productData.stock < 0) {
-        return next(AppError.badRequest('Stock cannot be negative'));
+    // Create product linked to Part
+    const product = await Product.create({
+        part: partId,
+        seller: req.seller.id,
+
+        // Product-specific fields
+        name: title || part.partName,
+        price,
+        originalPrice,
+        stock,
+        images,
+        condition: condition || 'New',
+        warranty: warrantyEnabled ? warranty : undefined,
+        remarks,
+        features: Array.isArray(keyPoints) ? keyPoints.filter(p => p.trim() !== '') : [],
+
+        // Specific attributes for THIS product (singular)
+        brand: brand || (part.brand?.[0]),
+        partNumber: partNumber || (part.partNumber || part.partNumbers?.[0]),
+        isCustomBrand: !!isCustomBrand,
+        isCustomPartNumber: !!isCustomPartNumber,
+
+        // Inherit or override compatible vehicles
+        compatibleVehicles: (compatibleVehicles && compatibleVehicles.length > 0)
+            ? compatibleVehicles
+            : part.compatibleVehicles,
+
+        // Inherit from Part (denormalized for performance)
+        description: part.description,
+        category: part.category,
+        subCategory: part.subCategory,
+        tags: part.tags,
+        specifications: part.specifications,
+
+        // Status and approval
+        status: 'PENDING_APPROVAL', // Admin must approve
+    });
+
+    // =========== UPDATE GLOBAL PART CATALOG ===========
+    let partUpdated = false;
+
+    // If seller added a NEW brand that's not in the Part's brand list
+    if (isCustomBrand && brand && !part.brand.includes(brand)) {
+        part.brand.push(brand);
+        partUpdated = true;
     }
 
-    // Set seller and status
-    productData.seller = req.seller.id;
-    productData.status = 'PENDING_APPROVAL';
+    // If seller added a NEW part number that's not in the Part's list
+    if (isCustomPartNumber && partNumber && !part.partNumbers.includes(partNumber)) {
+        part.partNumbers.push(partNumber);
+        partUpdated = true;
+    }
 
-    // Create product
-    const product = await Product.create(productData);
+    if (partUpdated) {
+        await part.save();
+    }
+    // ===============================================
 
     // Update seller metrics
     await Seller.findByIdAndUpdate(
@@ -337,7 +425,9 @@ exports.createProductSeller = catchAsync(async (req, res, next) => {
         data: {
             product: {
                 id: product.id,
+                partId: product.part,
                 name: product.name,
+                price: product.price,
                 status: product.status,
                 createdAt: product.createdAt,
             },
