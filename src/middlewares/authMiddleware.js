@@ -141,7 +141,11 @@ exports.protectSeller = catchAsync(async (req, res, next) => {
     }
 
     if (seller.isBlocked) {
-        return next(AppError.forbidden('Your account has been blocked'));
+        return next(
+            AppError.forbidden(
+                `Your account has been blocked. Reason: ${seller.blockReason || 'Violation of terms'}`
+            )
+        );
     }
 
     req.seller = {
@@ -150,6 +154,8 @@ exports.protectSeller = catchAsync(async (req, res, next) => {
         businessName: seller.businessName,
         verificationStatus: seller.verificationStatus,
         isActive: seller.isActive,
+        isBlocked: seller.isBlocked,
+        blockReason: seller.blockReason,
         canListProducts: seller.canListProducts,
     };
 
@@ -202,6 +208,20 @@ exports.protectAdmin = catchAsync(async (req, res, next) => {
 
     next();
 });
+
+/**
+ * Global block check for sellers (middleware)
+ */
+exports.checkBlockedSeller = (req, res, next) => {
+    if (req.seller && req.seller.isBlocked) {
+        return next(
+            AppError.forbidden(
+                `Your account has been blocked. Reason: ${req.seller.blockReason || 'Violation of terms'}`
+            )
+        );
+    }
+    next();
+};
 
 /**
  * Require verified seller
@@ -337,13 +357,23 @@ exports.protectAdminOrSeller = catchAsync(async (req, res, next) => {
 
             const seller = await Seller.findById(decoded.userId);
 
-            if (seller && !seller.isBlocked) {
+            if (seller) {
+                if (seller.isBlocked) {
+                    return next(
+                        AppError.forbidden(
+                            `Your account has been blocked. Reason: ${seller.blockReason || 'Violation of terms'}`
+                        )
+                    );
+                }
+
                 req.seller = {
                     id: seller.id,
                     email: seller.email,
                     businessName: seller.businessName,
                     verificationStatus: seller.verificationStatus,
                     isActive: seller.isActive,
+                    isBlocked: seller.isBlocked,
+                    blockReason: seller.blockReason,
                     canListProducts: seller.canListProducts,
                 };
                 return next();
