@@ -1,6 +1,6 @@
 const express = require('express');
 const sellerAuthController = require('../controllers/sellerAuthController');
-const { protectSeller } = require('../middlewares/authMiddleware');
+const { protectSeller, checkBlockedSeller } = require('../middlewares/authMiddleware');
 const { authLimiter, refreshLimiter } = require('../middlewares/securityMiddleware');
 
 const router = express.Router();
@@ -22,10 +22,10 @@ router.post('/refresh', refreshLimiter, sellerAuthController.refreshToken);
 router.post('/logout', protectSeller, sellerAuthController.logout);
 
 // Profile
-router.get('/me', protectSeller, sellerAuthController.getMe);
-router.patch('/me', protectSeller, sellerAuthController.updateMe);
+router.get('/me', protectSeller, checkBlockedSeller, sellerAuthController.getMe);
+router.patch('/me', protectSeller, checkBlockedSeller, sellerAuthController.updateMe);
 
 // KYC
-router.patch('/kyc', protectSeller, sellerAuthController.submitKyc);
+router.patch('/kyc', protectSeller, checkBlockedSeller, sellerAuthController.submitKyc);
 
 module.exports = router;

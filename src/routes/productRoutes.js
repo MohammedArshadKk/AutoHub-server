@@ -1,6 +1,6 @@
 const express = require('express');
 const productController = require('../controllers/productController');
-const { protect, protectSeller, protectAdmin, requireVerifiedSeller, hasPermission } = require('../middlewares/authMiddleware');
+const { protect, protectSeller, protectAdmin, requireVerifiedSeller, hasPermission, checkBlockedSeller } = require('../middlewares/authMiddleware');
 
 const router = express.Router();
 
@@ -15,17 +15,17 @@ router.get('/:id', productController.getProduct);
 // ==================== SELLER ROUTES ==================== //
 
 // My products (seller view)
-router.get('/seller/my-products', protectSeller, productController.getMyProducts);
+router.get('/seller/my-products', protectSeller, checkBlockedSeller, productController.getMyProducts);
 
 // Create product (seller - requires verification)
-router.post('/seller', protectSeller, requireVerifiedSeller, productController.createProductSeller);
+router.post('/seller', protectSeller, checkBlockedSeller, requireVerifiedSeller, productController.createProductSeller);
 
 // Update product (seller)
-router.get('/seller/:id', protectSeller, productController.getProductByIdSeller);
-router.patch('/seller/:id', protectSeller, productController.updateProductSeller);
+router.get('/seller/:id', protectSeller, checkBlockedSeller, productController.getProductByIdSeller);
+router.patch('/seller/:id', protectSeller, checkBlockedSeller, productController.updateProductSeller);
 
 // Delete product (seller)
-router.delete('/seller/:id', protectSeller, productController.deleteProductSeller);
+router.delete('/seller/:id', protectSeller, checkBlockedSeller, productController.deleteProductSeller);
 
 // ==================== ADMIN ROUTES ==================== //
 
