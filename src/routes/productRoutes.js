@@ -21,6 +21,7 @@ router.get('/seller/my-products', protectSeller, productController.getMyProducts
 router.post('/seller', protectSeller, requireVerifiedSeller, productController.createProductSeller);
 
 // Update product (seller)
+router.get('/seller/:id', protectSeller, productController.getProductByIdSeller);
 router.patch('/seller/:id', protectSeller, productController.updateProductSeller);
 
 // Delete product (seller)

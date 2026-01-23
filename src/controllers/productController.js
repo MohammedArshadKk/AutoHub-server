@@ -250,7 +250,7 @@ exports.getMyProducts = catchAsync(async (req, res, next) => {
             .sort('-createdAt')
             .skip(skip)
             .limit(limitNum)
-            .select('name images price stock status createdAt views soldCount')
+            .populate('part', 'partName defaultImageUrl')
             .lean(),
         Product.countDocuments(query),
         Product.aggregate([
@@ -436,6 +436,36 @@ exports.createProductSeller = catchAsync(async (req, res, next) => {
 });
 
 /**
+ * @desc    Get single product by ID (Seller)
+ * @route   GET /api/v1/products/seller/:id
+ * @access  Private (Seller - own products only)
+ */
+exports.getProductByIdSeller = catchAsync(async (req, res, next) => {
+    const { id } = req.params;
+
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+        return next(AppError.badRequest('Invalid product ID format'));
+    }
+
+    const product = await Product.findOne({
+        _id: id,
+        seller: req.seller.id,
+        isDeleted: false,
+    }).populate('part');
+
+    if (!product) {
+        return next(AppError.notFound('Product not found or access denied'));
+    }
+
+    res.status(200).json({
+        status: 'success',
+        data: {
+            product,
+        },
+    });
+});
+
+/**
  * @desc    Update product (Seller)
  * @route   PATCH /api/v1/products/seller/:id
  * @access  Private (Seller - own products only)
@@ -443,7 +473,6 @@ exports.createProductSeller = catchAsync(async (req, res, next) => {
 exports.updateProductSeller = catchAsync(async (req, res, next) => {
     const { id } = req.params;
 
-    // Validate ObjectId format
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
         return next(AppError.badRequest('Invalid product ID format'));
     }
@@ -459,32 +488,68 @@ exports.updateProductSeller = catchAsync(async (req, res, next) => {
         return next(AppError.forbidden('You can only update your own products'));
     }
 
-    // Cannot update archived/deleted products
+    // Cannot update archived products
     if (product.status === 'ARCHIVED') {
         return next(AppError.badRequest('Cannot update archived products'));
     }
 
-    // Sanitize input
-    const updateData = sanitizeProductInput(req.body);
+    const {
+        title, // Maps to name
+        price,
+        originalPrice,
+        stock,
+        condition,
+        brand,
+        isCustomBrand,
+        partNumber,
+        isCustomPartNumber,
+        compatibleVehicles,
+        warrantyEnabled,
+        warranty,
+        keyPoints, // Maps to features
+        remarks,
+        images,
+    } = req.body;
 
-    // Validate if there's anything to update
-    if (Object.keys(updateData).length === 0) {
-        return next(AppError.badRequest('No valid fields to update'));
+    // Build update object
+    const updateData = {};
+    if (title !== undefined) updateData.name = title.trim();
+    if (price !== undefined) updateData.price = Number(price);
+    if (originalPrice !== undefined) updateData.originalPrice = Number(originalPrice);
+    if (stock !== undefined) updateData.stock = Number(stock);
+    if (condition !== undefined) updateData.condition = condition;
+    if (remarks !== undefined) updateData.remarks = remarks;
+    if (images !== undefined) updateData.images = images;
+
+    if (keyPoints !== undefined) {
+        updateData.features = Array.isArray(keyPoints) ? keyPoints.filter(p => p.trim() !== '') : [];
     }
 
-    // Trim text fields
-    if (updateData.name) updateData.name = updateData.name.trim();
-    if (updateData.description) updateData.description = updateData.description.trim();
-    if (updateData.partNumber) updateData.partNumber = updateData.partNumber.trim().toUpperCase();
+    if (warrantyEnabled !== undefined) {
+        updateData.warranty = warrantyEnabled ? warranty : undefined;
+    } else if (warranty !== undefined) {
+        updateData.warranty = warranty;
+    }
 
-    // Validate price logic
-    const finalPrice = updateData.price || product.price;
-    const finalOriginalPrice = updateData.originalPrice || product.originalPrice;
+    if (compatibleVehicles !== undefined) {
+        updateData.compatibleVehicles = compatibleVehicles;
+    }
+
+    // Handle Custom Brand/Part Number logic (Singular fields in Product)
+    if (isCustomBrand !== undefined) updateData.isCustomBrand = !!isCustomBrand;
+    if (brand !== undefined) updateData.brand = brand;
+
+    if (isCustomPartNumber !== undefined) updateData.isCustomPartNumber = !!isCustomPartNumber;
+    if (partNumber !== undefined) updateData.partNumber = partNumber;
+
+    // Validate price logic if changed
+    const finalPrice = updateData.price ?? product.price;
+    const finalOriginalPrice = updateData.originalPrice ?? product.originalPrice;
     if (finalOriginalPrice && finalOriginalPrice < finalPrice) {
         return next(AppError.badRequest('Original price cannot be less than selling price'));
     }
 
-    // If product was active and is being edited, send back to pending
+    // If product was active and is being edited, send back to pending for re-approval
     if (product.status === 'ACTIVE') {
         updateData.status = 'PENDING_APPROVAL';
     }
@@ -493,6 +558,30 @@ exports.updateProductSeller = catchAsync(async (req, res, next) => {
         new: true,
         runValidators: true,
     });
+
+    // =========== UPDATE GLOBAL PART CATALOG (Sync) ===========
+    // If seller added a NEW brand or part number that's not in the Part's list
+    if ((isCustomBrand && brand) || (isCustomPartNumber && partNumber)) {
+        const part = await Part.findById(product.part);
+        if (part) {
+            let partUpdated = false;
+
+            if (isCustomBrand && brand && !part.brand.includes(brand)) {
+                part.brand.push(brand);
+                partUpdated = true;
+            }
+
+            if (isCustomPartNumber && partNumber && !part.partNumbers.includes(partNumber)) {
+                part.partNumbers.push(partNumber);
+                partUpdated = true;
+            }
+
+            if (partUpdated) {
+                await part.save();
+            }
+        }
+    }
+    // ===============================================
 
     res.status(200).json({
         status: 'success',
@@ -527,17 +616,20 @@ exports.deleteProductSeller = catchAsync(async (req, res, next) => {
         return next(AppError.forbidden('You can only delete your own products'));
     }
 
-    // Soft delete
+    // Capture status before update for metrics
     const wasActive = product.status === 'ACTIVE';
-    product.isDeleted = true;
-    product.status = 'ARCHIVED';
-    await product.save();
 
-    // Update seller metrics if product was active
+    // Atomic soft delete
+    await Product.findByIdAndUpdate(id, {
+        isDeleted: true,
+        status: 'ARCHIVED',
+    });
+
+    // Update seller metrics if product was active (Async)
     if (wasActive) {
-        await Seller.findByIdAndUpdate(req.seller.id, {
+        Seller.findByIdAndUpdate(req.seller.id, {
             $inc: { 'metrics.activeProducts': -1 },
-        });
+        }).exec().catch(err => console.error('Error updating seller metrics:', err));
     }
 
     res.status(200).json({
