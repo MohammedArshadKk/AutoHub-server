@@ -286,6 +286,122 @@ DELETE /products/seller/:id
 
 ## Products - Admin
 
+### Get All Products (Admin)
+```
+GET /products/admin/all
+```
+**Requires:** Admin with 'products' permission
+
+**Query Parameters:**
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `page` | Number | 1 | Page number |
+| `limit` | Number | 20 | Items per page (max 100) |
+| `status` | String | - | Filter by status (DRAFT, ACTIVE, REJECTED) |
+| `seller` | ID | - | Filter by seller ID |
+| `brand` | String | - | Filter by brand name |
+| `search` | String | - | Search by name, part number, or brand |
+
+**Response:** `200 OK`
+```json
+{
+  "status": "success",
+  "results": 5,
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 5,
+    "pages": 1,
+    "hasNext": false,
+    "hasPrev": false
+  },
+  "data": {
+    "products": [
+      {
+        "_id": "6973b1aeeec24593b6b3e84f",
+        "name": "Premium Brake Pad Set",
+        "partNumber": "BP-CERAMIC-2024",
+        "remarks": "Priority listing",
+        "status": "ACTIVE",
+        "seller": {
+          "businessName": "Liquidlab",
+          "ownerName": "John Doe",
+          "email": "seller@example.com",
+          "verificationStatus": "VERIFIED"
+        }
+      }
+    ]
+  }
+}
+```
+
+### Get Single Product Details (Admin)
+```
+GET /products/admin/:id
+```
+**Requires:** Admin with 'products' permission
+
+**Description:** Returns exhaustive details for a single product, including full seller and part information.
+
+**Response:** `200 OK`
+```json
+{
+  "status": "success",
+  "data": {
+    "product": {
+      "_id": "6973b1aeeec24593b6b3e84f",
+      "name": "Premium Brake Pad Set",
+      "description": "High-performance ceramic brake pads...",
+      "partNumber": "BP-CERAMIC-2024",
+      "features": ["Low Noise", "High Heat Resistance"],
+      "remarks": "Priority listing",
+      "images": ["https://..."],
+      "price": 2500,
+      "originalPrice": 3000,
+      "currency": "INR",
+      "compatibleVehicles": [
+        { "year": 2022, "make": "Toyota", "model": "Camry" }
+      ],
+      "category": "Brakes",
+      "subCategory": "Brake Pads",
+      "condition": "New",
+      "stock": 50,
+      "status": "ACTIVE",
+      "seller": {
+        "_id": "696fe265f08eb884978ec12e",
+        "businessName": "Liquidlab",
+        "ownerName": "John Doe",
+        "email": "seller@example.com",
+        "phone": "+919870230787",
+        "verificationStatus": "VERIFIED",
+        "metrics": { "activeProducts": 8 }
+      },
+      "part": {
+        "_id": "696fe...",
+        "partName": "Premium Brake Pad Set",
+        "category": "Brakes"
+      },
+      "approvedBy": {
+        "name": "Admin User",
+        "email": "admin@example.com"
+      },
+      "approvedAt": "2026-01-20T10:00:00.000Z",
+      "brand": "Brembo",
+      "weight": { "value": 2.5, "unit": "kg" },
+      "dimensions": { "length": 25, "width": 15, "height": 5, "unit": "cm" },
+      "tags": ["brakes", "ceramic"],
+      "views": 150,
+      "soldCount": 20,
+      "isFeatured": true,
+      "isDeleted": false,
+      "createdAt": "2026-01-15T12:00:00.000Z",
+      "updatedAt": "2026-01-20T10:00:00.000Z"
+    }
+  }
+}
+```
+
+
 ### Get Pending Products
 ```
 GET /products/admin/pending
@@ -304,6 +420,14 @@ POST /products/admin
 PATCH /products/admin/:id
 ```
 **Requires:** Admin with 'products' permission
+**Body:**
+```json
+{
+  "name": "Updated Product Name",
+  "status": "RESUBMIT", // Options: ACTIVE, REJECTED, ARCHIVED, RESUBMIT, SUSPENDED, SOLD
+  "resubmitNote": "Please fix the image resolution and update the description."
+}
+```
 
 ### Delete Any Product
 ```

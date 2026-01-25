@@ -47,6 +47,7 @@ exports.createOrder = catchAsync(async (req, res, next) => {
 
         orderItems.push({
             product: product._id,
+            seller: product.seller,
             name: product.name,
             price: actualPrice,
             quantity: item.quantity,
@@ -137,6 +138,7 @@ exports.createOrderForPayment = catchAsync(async (req, res, next) => {
 
         orderItems.push({
             product: product._id,
+            seller: product.seller,
             name: product.name,
             price: actualPrice,
             quantity: item.quantity,

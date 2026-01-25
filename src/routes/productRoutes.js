@@ -9,9 +9,6 @@ const router = express.Router();
 // Get all products (with filters)
 router.get('/', productController.getProducts);
 
-// Get single product
-router.get('/:id', productController.getProduct);
-
 // ==================== SELLER ROUTES ==================== //
 
 // My products (seller view)
@@ -29,24 +26,26 @@ router.delete('/seller/:id', protectSeller, checkBlockedSeller, productControlle
 
 // ==================== ADMIN ROUTES ==================== //
 
-// Get pending products
+// Get all seller products (with pagination and filters)
+router.get('/admin/all', protectAdmin, hasPermission('products'), productController.getAllProductsAdmin);
 router.get('/admin/pending', protectAdmin, hasPermission('products'), productController.getPendingProducts);
 
-// Create product (admin - direct publish)
-// hasPermission('products')
-// protectAdmin
+// Create product (admin)
 router.post('/admin', productController.createProductAdmin);
 
-// Update any product (admin)
+// Admin specific product operations (ID based)
+router.get('/admin/:id', protectAdmin, hasPermission('products'), productController.getProductAdmin);
 router.patch('/admin/:id', protectAdmin, hasPermission('products'), productController.updateProductAdmin);
-
-// Delete any product (admin)
+router.put('/admin/:id', protectAdmin, hasPermission('products'), productController.updateProductAdmin); // Support PUT as well
 router.delete('/admin/:id', protectAdmin, hasPermission('products'), productController.deleteProductAdmin);
 
-// Approve product
+// Approval workflow
 router.patch('/admin/:id/approve', protectAdmin, hasPermission('products'), productController.approveProduct);
-
-// Reject product
 router.patch('/admin/:id/reject', protectAdmin, hasPermission('products'), productController.rejectProduct);
+
+// ==================== PUBLIC ROUTES (Generic) ==================== //
+
+// Get single product (Keep this last to avoid shadowing other routes)
+router.get('/:id', productController.getProduct);
 
 module.exports = router;

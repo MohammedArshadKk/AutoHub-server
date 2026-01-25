@@ -10,6 +10,7 @@ const ALLOWED_PRODUCT_FIELDS = [
     'name', 'description', 'partNumber', 'images', 'price', 'originalPrice',
     'currency', 'compatibleVehicles', 'category', 'subCategory', 'condition',
     'stock', 'specifications', 'brand', 'weight', 'dimensions', 'warranty', 'tags',
+    'features', 'remarks',
 ];
 
 // Sanitize and validate product input
@@ -309,6 +310,8 @@ exports.createProductSeller = catchAsync(async (req, res, next) => {
         keyPoints, // Maps to features
         remarks,
         images,
+        weight,
+        dimensions,
     } = req.body;
 
     // Validate Part ID
@@ -369,6 +372,8 @@ exports.createProductSeller = catchAsync(async (req, res, next) => {
         warranty: warrantyEnabled ? warranty : undefined,
         remarks,
         features: Array.isArray(keyPoints) ? keyPoints.filter(p => p.trim() !== '') : [],
+        weight,
+        dimensions,
 
         // Specific attributes for THIS product (singular)
         brand: brand || (part.brand?.[0]),
@@ -488,7 +493,6 @@ exports.updateProductSeller = catchAsync(async (req, res, next) => {
         return next(AppError.forbidden('You can only update your own products'));
     }
 
-    // Cannot update archived products
     if (product.status === 'ARCHIVED') {
         return next(AppError.badRequest('Cannot update archived products'));
     }
@@ -499,6 +503,8 @@ exports.updateProductSeller = catchAsync(async (req, res, next) => {
         originalPrice,
         stock,
         condition,
+        weight,
+        dimensions,
         brand,
         isCustomBrand,
         partNumber,
@@ -519,7 +525,10 @@ exports.updateProductSeller = catchAsync(async (req, res, next) => {
     if (stock !== undefined) updateData.stock = Number(stock);
     if (condition !== undefined) updateData.condition = condition;
     if (remarks !== undefined) updateData.remarks = remarks;
+    if (remarks !== undefined) updateData.remarks = remarks;
     if (images !== undefined) updateData.images = images;
+    if (weight !== undefined) updateData.weight = weight;
+    if (dimensions !== undefined) updateData.dimensions = dimensions;
 
     if (keyPoints !== undefined) {
         updateData.features = Array.isArray(keyPoints) ? keyPoints.filter(p => p.trim() !== '') : [];
@@ -549,9 +558,12 @@ exports.updateProductSeller = catchAsync(async (req, res, next) => {
         return next(AppError.badRequest('Original price cannot be less than selling price'));
     }
 
-    // If product was active and is being edited, send back to pending for re-approval
-    if (product.status === 'ACTIVE') {
+    // If product was ACTIVE, RESUBMIT, or REJECTED and is being edited, send back to pending for re-approval
+    if (['ACTIVE', 'RESUBMIT', 'REJECTED'].includes(product.status)) {
         updateData.status = 'PENDING_APPROVAL';
+        // Clear rejection/resubmit notes as it's a new submission
+        updateData.rejectionReason = undefined;
+        updateData.resubmitNote = undefined;
     }
 
     const updatedProduct = await Product.findByIdAndUpdate(id, updateData, {
@@ -639,6 +651,116 @@ exports.deleteProductSeller = catchAsync(async (req, res, next) => {
 });
 
 // ==================== ADMIN ENDPOINTS ==================== //
+
+/**
+ * @desc    Get all products from sellers (Admin)
+ * @route   GET /api/v1/products/admin/all
+ * @access  Private (Admin)
+ */
+exports.getAllProductsAdmin = catchAsync(async (req, res, next) => {
+    const {
+        page = 1,
+        limit = 20,
+        status,
+        seller,
+        brand,
+        search,
+        sortBy = 'createdAt',
+        order = 'desc',
+    } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    const sortOrder = order === 'asc' ? 1 : -1;
+    const sortObj = { [sortBy]: sortOrder };
+
+    // Build query
+    const query = { isDeleted: false };
+
+    if (status) {
+        query.status = status;
+    }
+
+    if (seller) {
+        if (!seller.match(/^[0-9a-fA-F]{24}$/)) {
+            return next(AppError.badRequest('Invalid seller ID format'));
+        }
+        query.seller = seller;
+    }
+
+    if (brand) {
+        query.brand = { $regex: new RegExp(brand, 'i') };
+    }
+
+    if (search && search.trim()) {
+        const searchRegex = new RegExp(search.trim(), 'i');
+        query.$or = [
+            { name: searchRegex },
+            { partNumber: searchRegex },
+            { brand: searchRegex },
+        ];
+    }
+
+    const [products, total] = await Promise.all([
+        Product.find(query)
+            .sort(sortObj)
+            .skip(skip)
+            .limit(limitNum)
+            .populate('seller', 'businessName ownerName email phone logo verificationStatus')
+            .populate('part', 'partName')
+            .lean(),
+        Product.countDocuments(query),
+    ]);
+
+    res.status(200).json({
+        status: 'success',
+        results: products.length,
+        pagination: {
+            page: pageNum,
+            limit: limitNum,
+            total,
+            pages: Math.ceil(total / limitNum),
+            hasNext: pageNum < Math.ceil(total / limitNum),
+            hasPrev: pageNum > 1,
+        },
+        data: {
+            products,
+        },
+    });
+});
+
+/**
+ * @desc    Get single product details (Admin)
+ * @route   GET /api/v1/products/admin/:id
+ * @access  Private (Admin)
+ */
+exports.getProductAdmin = catchAsync(async (req, res, next) => {
+    const { id } = req.params;
+
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+        return next(AppError.badRequest('Invalid product ID format'));
+    }
+
+    const product = await Product.findById(id)
+        .populate('seller')
+        .populate('part')
+        .populate('admin', 'name email')
+        .populate('approvedBy', 'name email role')
+        .lean();
+
+    if (!product) {
+        return next(AppError.notFound('Product not found'));
+    }
+
+    res.status(200).json({
+        status: 'success',
+        data: {
+            product,
+        },
+    });
+});
 
 /**
  * @desc    Get pending products
@@ -747,7 +869,7 @@ exports.updateProductAdmin = catchAsync(async (req, res, next) => {
     // Admin can update any field including status
     const adminAllowedFields = [
         ...ALLOWED_PRODUCT_FIELDS,
-        'status', 'isFeatured', 'seller',
+        'status', 'isFeatured', 'seller', 'resubmitNote', 'rejectionReason',
     ];
 
     const updateData = sanitizeProductInput(req.body, adminAllowedFields);

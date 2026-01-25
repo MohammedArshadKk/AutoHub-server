@@ -35,7 +35,7 @@ const productSchema = new mongoose.Schema(
             default: [],
         },
 
-        // Seller/Admin Remarks
+        // Product Remarks
         remarks: {
             type: String,
             maxlength: [1000, 'Remarks cannot exceed 1000 characters'],
@@ -149,12 +149,16 @@ const productSchema = new mongoose.Schema(
         status: {
             type: String,
             enum: {
-                values: ['DRAFT', 'PENDING_APPROVAL', 'ACTIVE', 'REJECTED', 'ARCHIVED'],
+                values: ['DRAFT', 'PENDING_APPROVAL', 'ACTIVE', 'REJECTED', 'ARCHIVED', 'RESUBMIT', 'SUSPENDED', 'SOLD'],
                 message: 'Invalid status',
             },
             default: 'PENDING_APPROVAL',
         },
         rejectionReason: {
+            type: String,
+            maxlength: 500,
+        },
+        resubmitNote: {
             type: String,
             maxlength: 500,
         },
