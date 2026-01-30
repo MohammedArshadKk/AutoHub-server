@@ -18,7 +18,7 @@ router.post('/', protectBuyer, validateCreateOrder, orderController.createOrder)
 router.post('/create-for-payment', protectBuyer, validateCreateOrder, orderController.createOrderForPayment);
 
 // Payment Flow
-
+router.post('/payment/verify', protectBuyer, validatePaymentVerification, orderController.verifyPaymentAndUpdateOrder);
 router.post('/:orderId/payment/verify', protectBuyer, validatePaymentVerification, orderController.verifyPaymentAndUpdateOrder);
 
 // Order Management
