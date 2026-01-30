@@ -235,6 +235,8 @@ exports.createOrderForPayment = catchAsync(async (req, res, next) => {
         receiptId
     );
 
+    console.log(`✅ Razorpay Order Created: ${razorpayOrder.id} for receipt: ${receiptId}`);
+
     // 2. Create Database Orders (Split) with proper Razorpay Order ID
     const canUseTransactions = supportsTransactions();
     const session = canUseTransactions ? await mongoose.startSession() : null;
@@ -317,7 +319,10 @@ exports.verifyPaymentAndUpdateOrder = catchAsync(async (req, res, next) => {
     const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
     const buyerId = req.user._id;
 
+    console.log('🔍 Verifying payment:', { razorpayOrderId, razorpayPaymentId, buyerId });
+
     if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+        console.error('❌ Missing verification details in body');
         return next(AppError.badRequest('Missing verification details'));
     }
 
@@ -331,28 +336,67 @@ exports.verifyPaymentAndUpdateOrder = catchAsync(async (req, res, next) => {
     // Find all orders linked to this razorpay_order_id
     const orders = await Order.find({ razorpayOrderId: razorpayOrderId, buyer: buyerId });
 
+    console.log(`📦 Found ${orders.length} orders for Razorpay Order ID: ${razorpayOrderId}`);
+
     if (orders.length === 0) {
+        console.error(`❌ No orders found for ${razorpayOrderId} and buyer ${buyerId}`);
         return next(AppError.notFound('No orders found for this payment reference'));
     }
 
+    // IDEMPOTENCY CHECK: If first order is already paid, assume all are processed
+    if (orders[0].paymentStatus === 'paid') {
+        console.log(`ℹ️ Orders for ${razorpayOrderId} already marked as paid. Returning success.`);
+        return res.json({
+            status: 'success',
+            message: 'Payment already verified.',
+            data: {
+                ordersCount: orders.length,
+                orderNumbers: orders.map(o => o.orderNumber)
+            },
+        });
+    }
+
+    // 3. Signature verification
+    // Note: We check signature first, but if it fails, we fall back to direct API check
+    // to handle cases where frontend/backend are slightly out of sync or signature logic differs.
     if (!isValid) {
-        // Mark all as failed
-        await Promise.all(orders.map(order => {
-            order.paymentStatus = 'failed';
-            order.orderStatus = 'payment_failed';
-            order.paymentFailedAt = new Date();
-            order.statusHistory.push({
-                status: 'payment_failed',
-                note: 'Signature verification failed',
-                userModel: 'User'
-            });
-            return order.save();
-        }));
-        return next(AppError.badRequest('Payment verification failed'));
+        console.warn('⚠️ Razorpay signature verification failed locally. Falling back to direct API check...');
+        const checkResult = await razorpayService.checkPayment(razorpayPaymentId);
+
+        if (!checkResult.success) {
+            console.error('❌ Direct API check also failed or payment not successful');
+            // Mark all as failed since even manual check failed
+            await Promise.all(orders.map(order => {
+                order.paymentStatus = 'failed';
+                order.orderStatus = 'payment_failed';
+                order.paymentFailedAt = new Date();
+                order.statusHistory.push({
+                    status: 'payment_failed',
+                    note: `Payment verification failed. Local: signature mismatch. Razorpay: ${checkResult.payment?.status || 'unknown'}`,
+                    userModel: 'User'
+                });
+                return order.save();
+            }));
+            return next(AppError.badRequest('Payment verification failed'));
+        }
+
+        console.log('✅ Fallback: Direct API check confirmed payment is successful');
     }
 
     // Fetch details
-    const paymentDetails = await razorpayService.getPaymentDetails(razorpayPaymentId);
+    let paymentDetails = await razorpayService.getPaymentDetails(razorpayPaymentId);
+
+    // If payment is authorized but not captured, try to capture it now
+    if (paymentDetails.status === 'authorized') {
+        console.log(`💰 Payment ${razorpayPaymentId} is authorized. Capturing now...`);
+        try {
+            paymentDetails = await razorpayService.capturePayment(razorpayPaymentId, paymentDetails.amount / 100);
+            console.log(`✅ Payment ${razorpayPaymentId} captured successfully`);
+        } catch (captureErr) {
+            console.error(`❌ Manual capture failed for ${razorpayPaymentId}:`, captureErr);
+            // We can still proceed if we want to trust 'authorized', but safer to fail if capture fails
+        }
+    }
 
     if (paymentDetails.status !== 'captured') {
         await Promise.all(orders.map(order => {
@@ -361,16 +405,19 @@ exports.verifyPaymentAndUpdateOrder = catchAsync(async (req, res, next) => {
             order.paymentFailedAt = new Date();
             order.statusHistory.push({
                 status: 'payment_failed',
-                note: `Payment status: ${paymentDetails.status}`,
+                note: `Payment status: ${paymentDetails.status}. Capture required.`,
                 userModel: 'User'
             });
             return order.save();
         }));
-        return next(AppError.badRequest('Payment not captured'));
+        return next(AppError.badRequest(`Payment not captured. Status: ${paymentDetails.status}`));
     }
 
     // Success - Update ALL split orders
     const updatedOrders = await Promise.all(orders.map(async (order) => {
+        // Double check idempotency per order
+        if (order.paymentStatus === 'paid') return order;
+
         order.paymentStatus = 'paid';
         order.orderStatus = 'confirmed'; // Confirmed immediately upon payment
         order.razorpayPaymentId = razorpayPaymentId;
@@ -379,20 +426,25 @@ exports.verifyPaymentAndUpdateOrder = catchAsync(async (req, res, next) => {
         order.paidAt = new Date();
         order.confirmedAt = new Date();
         order.paymentCompletedAt = new Date(paymentDetails.created_at * 1000);
+        order.paymentGatewayResponse = paymentDetails; // Store full response for audit
 
         // Extract method details (simplified)
         order.paymentDetails = {
             method: paymentDetails.method,
             bank: paymentDetails.bank,
             wallet: paymentDetails.wallet,
-            vpa: paymentDetails.vpa
+            vpa: paymentDetails.vpa,
+            card: paymentDetails.card ? {
+                network: paymentDetails.card.network,
+                last4: paymentDetails.card.last4,
+                issuer: paymentDetails.card.issuer
+            } : undefined
         };
 
         order.statusHistory.push({
             status: 'confirmed',
             note: 'Payment successful, Order confirmed',
             timestamp: new Date(),
-
             userModel: 'User'
         });
 
@@ -532,15 +584,18 @@ exports.cancelOrder = catchAsync(async (req, res, next) => {
         }
     }
 
-    // Cancel
-    await order.cancel(reason, user._id, 'User');
-
-    // Restore stock
-    for (const item of order.items) {
-        await Product.findByIdAndUpdate(item.product, {
-            $inc: { stock: item.quantity }
-        });
+    // Restore stock ONLY if it was previously decremented
+    // Stock is NOT decremented for online orders until payment is successful (payment_pending)
+    if (order.orderStatus !== 'payment_pending' && order.orderStatus !== 'payment_failed') {
+        for (const item of order.items) {
+            await Product.findByIdAndUpdate(item.product, {
+                $inc: { stock: item.quantity }
+            });
+        }
     }
+
+    // Cancel order status finally (order.cancel saves the status change)
+    await order.cancel(reason, user._id, 'User');
 
     res.json({
         status: 'success',
@@ -658,11 +713,13 @@ exports.updateOrderStatus = catchAsync(async (req, res, next) => {
         order.cancelledAt = new Date();
         order.cancellationReason = note || 'Cancelled by seller';
 
-        // Restore stock logic if cancelled by seller
-        for (const item of order.items) {
-            await Product.findByIdAndUpdate(item.product, {
-                $inc: { stock: item.quantity }
-            });
+        // Restore stock logic ONLY if it was previously decremented
+        if (order.orderStatus !== 'payment_pending' && order.orderStatus !== 'payment_failed') {
+            for (const item of order.items) {
+                await Product.findByIdAndUpdate(item.product, {
+                    $inc: { stock: item.quantity }
+                });
+            }
         }
     }
 
@@ -702,4 +759,253 @@ exports.getSellerOrderById = catchAsync(async (req, res, next) => {
         data: { order }
     });
 });
+/**
+ * Sync Order Payment status with Razorpay (Buyer initiated or system cleanup)
+ * POST /api/v1/orders/payment/sync
+ */
+exports.syncOrderPayment = catchAsync(async (req, res, next) => {
+    const { razorpayOrderId } = req.body;
+    const buyerId = req.user._id;
 
+    if (!razorpayOrderId) {
+        return next(AppError.badRequest('Razorpay Order ID is required'));
+    }
+
+    // Find all orders linked to this razorpayOrderId
+    const orders = await Order.find({ razorpayOrderId: razorpayOrderId, buyer: buyerId });
+
+    if (orders.length === 0) {
+        return next(AppError.notFound('No orders found for this payment reference'));
+    }
+
+    // If already paid, return success
+    if (orders[0].paymentStatus === 'paid') {
+        return res.json({
+            status: 'success',
+            message: 'Payment already verified',
+            data: {
+                ordersCount: orders.length,
+                orderNumbers: orders.map(o => o.orderNumber)
+            }
+        });
+    }
+
+    // Fetch payments from Razorpay
+    const payments = await razorpayService.getPaymentsForOrder(razorpayOrderId);
+    // Find a payment that is either captured or authorized
+    let successfulPayment = payments.find(p => p.status === 'captured' || p.status === 'authorized');
+
+    if (!successfulPayment) {
+        return res.json({
+            status: 'fail',
+            message: 'No successful payment found on Razorpay for this order.',
+            data: {
+                razorpayStatus: payments.length > 0 ? payments[0].status : 'created',
+                attemptsCount: payments.length
+            }
+        });
+    }
+
+    // If payment is authorized but not captured, try to capture it
+    if (successfulPayment.status === 'authorized') {
+        try {
+            successfulPayment = await razorpayService.capturePayment(successfulPayment.id, successfulPayment.amount / 100);
+        } catch (captureErr) {
+            console.error(`Capture failed during sync for ${successfulPayment.id}:`, captureErr);
+        }
+    }
+
+    // Re-verify status after possible capture
+    if (successfulPayment.status !== 'captured') {
+        return res.json({
+            status: 'fail',
+            message: `Payment found but could not be captured. Status: ${successfulPayment.status}`,
+        });
+    }
+
+    // Found a successful payment! Update orders
+    const updatedOrders = await Promise.all(orders.map(async (order) => {
+        if (order.paymentStatus === 'paid') return order;
+
+        order.paymentStatus = 'paid';
+        order.orderStatus = 'confirmed';
+        order.razorpayPaymentId = successfulPayment.id;
+        order.transactionId = successfulPayment.acquirer_data?.bank_transaction_id || successfulPayment.id;
+        order.paidAt = new Date();
+        order.confirmedAt = new Date();
+        order.paymentCompletedAt = new Date(successfulPayment.created_at * 1000);
+        order.paymentGatewayResponse = successfulPayment;
+
+        order.paymentDetails = {
+            method: successfulPayment.method,
+            bank: successfulPayment.bank,
+            wallet: successfulPayment.wallet,
+            vpa: successfulPayment.vpa,
+            card: successfulPayment.card ? {
+                network: successfulPayment.card.network,
+                last4: successfulPayment.card.last4,
+                issuer: successfulPayment.card.issuer
+            } : undefined
+        };
+
+        order.statusHistory.push({
+            status: 'confirmed',
+            note: 'Order synchronized with Razorpay payment',
+            timestamp: new Date(),
+            userModel: 'User'
+        });
+
+        // Decrement stock and update metrics
+        for (const item of order.items) {
+            await Product.findByIdAndUpdate(item.product, {
+                $inc: { stock: -item.quantity },
+                $set: { lastSoldAt: new Date() }
+            });
+
+            Seller.findByIdAndUpdate(order.seller, {
+                $inc: { 'metrics.totalOrders': 1, 'metrics.totalRevenue': order.totalAmount }
+            }).exec().catch(() => { });
+        }
+
+        return order.save();
+    }));
+
+    res.json({
+        status: 'success',
+        message: 'Payment synchronized and verified successfully!',
+        data: {
+            ordersCount: updatedOrders.length,
+            orderNumbers: updatedOrders.map(o => o.orderNumber)
+        }
+    });
+});
+/**
+ * Admin: Get all orders with filtering and search
+ * GET /api/v1/orders/admin/all
+ */
+exports.getAdminOrders = catchAsync(async (req, res, next) => {
+    const {
+        page = 1,
+        limit = 20,
+        sellerId,
+        status,
+        paymentStatus,
+        paymentMethod,
+        search,
+        startDate,
+        endDate
+    } = req.query;
+
+    const query = {};
+
+    // Filter by seller
+    if (sellerId) query.seller = sellerId;
+
+    // Filter by status
+    if (status) query.orderStatus = status;
+
+    // Filter by payment status
+    if (paymentStatus) query.paymentStatus = paymentStatus;
+
+    // Filter by payment method
+    if (paymentMethod) query.paymentMethod = paymentMethod;
+
+    // Search by order number
+    if (search) {
+        query.orderNumber = { $regex: search, $options: 'i' };
+    }
+
+    // Date range filter
+    if (startDate || endDate) {
+        query.createdAt = {};
+        if (startDate) query.createdAt.$gte = new Date(startDate);
+        if (endDate) query.createdAt.$lte = new Date(endDate);
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [orders, total] = await Promise.all([
+        Order.find(query)
+            .populate('buyer', 'name email phone avatar')
+            .populate('seller', 'businessName ownerName email')
+            .populate('items.product', 'name images price')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(parseInt(limit)),
+        Order.countDocuments(query)
+    ]);
+
+    res.json({
+        status: 'success',
+        results: orders.length,
+        pagination: {
+            total,
+            page: parseInt(page),
+            pages: Math.ceil(total / limit),
+            limit: parseInt(limit)
+        },
+        data: { orders }
+    });
+});
+
+/**
+ * Admin: Get order details by ID
+ * GET /api/v1/orders/admin/:id
+ */
+exports.getAdminOrderById = catchAsync(async (req, res, next) => {
+    const { id } = req.params;
+
+    const order = await Order.findById(id)
+        .populate('buyer', 'name email phone address avatar')
+        .populate('seller', 'businessName ownerName email phone address')
+        .populate('items.product', 'name images price sku');
+
+    if (!order) return next(AppError.notFound('Order not found'));
+
+    res.json({
+        status: 'success',
+        data: { order }
+    });
+});
+
+/**
+ * Admin: Update order status (Override)
+ * PATCH /api/v1/orders/admin/:id/status
+ */
+exports.adminUpdateOrderStatus = catchAsync(async (req, res, next) => {
+    const { id } = req.params;
+    const { status, note } = req.body;
+
+    const order = await Order.findById(id);
+    if (!order) return next(AppError.notFound('Order not found'));
+
+    const oldStatus = order.orderStatus;
+    order.orderStatus = status;
+
+    // Handle cancellation stock restoration if needed
+    if (status === 'cancelled' && oldStatus !== 'cancelled') {
+        // Only restore if it was previously decremented
+        if (order.paymentStatus === 'paid' || order.paymentMethod === 'cod') {
+            for (const item of order.items) {
+                await Product.findByIdAndUpdate(item.product, {
+                    $inc: { stock: item.quantity }
+                });
+            }
+        }
+    }
+
+    order.statusHistory.push({
+        status,
+        note: note || `Status updated by admin. Previous: ${oldStatus}`,
+        timestamp: new Date(),
+        userModel: 'Admin'
+    });
+
+    await order.save();
+
+    res.json({
+        status: 'success',
+        message: 'Order status updated successfully',
+        data: { order }
+    });
+});

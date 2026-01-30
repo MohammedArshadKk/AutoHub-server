@@ -1,8 +1,18 @@
 const express = require('express');
 const router = express.Router();
 const orderController = require('../controllers/orderController');
-const { protectBuyer, protectSeller } = require('../middlewares/authMiddleware');
+const webhookController = require('../controllers/webhookController');
+const { protectBuyer, protectSeller, protectAdmin } = require('../middlewares/authMiddleware');
 const { validateCreateOrder, validatePaymentVerification } = require('../validators/orderValidation');
+
+// ==================== WEBHOOK ROUTES ====================
+// Public routes protected by signature verification
+router.post('/webhook/razorpay', webhookController.handleRazorpayWebhook);
+
+// ==================== ADMIN ROUTES ====================
+router.get('/admin/all', protectAdmin, orderController.getAdminOrders);
+router.get('/admin/:id', protectAdmin, orderController.getAdminOrderById);
+router.patch('/admin/:id/status', protectAdmin, orderController.adminUpdateOrderStatus);
 
 // ==================== SELLER ROUTES ====================
 // Specific Seller routes must be defined before generic /:orderId to avoid matching conflict
@@ -19,6 +29,7 @@ router.post('/create-for-payment', protectBuyer, validateCreateOrder, orderContr
 
 // Payment Flow
 router.post('/payment/verify', protectBuyer, validatePaymentVerification, orderController.verifyPaymentAndUpdateOrder);
+router.post('/payment/sync', protectBuyer, orderController.syncOrderPayment);
 router.post('/:orderId/payment/verify', protectBuyer, validatePaymentVerification, orderController.verifyPaymentAndUpdateOrder);
 
 // Order Management

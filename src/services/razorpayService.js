@@ -85,6 +85,27 @@ exports.verifyPaymentSignature = (orderId, paymentId, signature) => {
 };
 
 /**
+ * Check payment status (user requested logic)
+ * @param {string} paymentId - Razorpay payment ID
+ * @returns {Promise<object>} { success, payment }
+ */
+exports.checkPayment = async (paymentId) => {
+    try {
+        const razorpay = getRazorpayInstance();
+        const payment = await razorpay.payments.fetch(paymentId);
+
+        if (payment.status === "captured" || payment.status === "authorized") {
+            return { success: true, payment };
+        } else {
+            return { success: false, payment };
+        }
+    } catch (error) {
+        console.error(`checkPayment failed for ${paymentId}:`, error);
+        return { success: false, error: error.message };
+    }
+};
+
+/**
  * Get payment details from Razorpay
  * @param {string} paymentId - Razorpay payment ID
  * @returns {Promise<object>} Payment details
@@ -119,6 +140,66 @@ exports.refundPayment = async (paymentId, amount = null) => {
     } catch (error) {
         console.error('Refund failed:', error);
         throw new Error('Failed to process refund');
+    }
+};
+
+/**
+ * Verify Razorpay webhook signature
+ * @param {string} body - Raw request body
+ * @param {string} signature - Razorpay signature from headers
+ * @returns {boolean} True if signature is valid
+ */
+exports.verifyWebhookSignature = (body, signature) => {
+    try {
+        const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+        if (!secret) {
+            console.error('RAZORPAY_WEBHOOK_SECRET is not configured');
+            return false;
+        }
+
+        const expectedSignature = crypto
+            .createHmac('sha256', secret)
+            .update(body)
+            .digest('hex');
+
+        return expectedSignature === signature;
+    } catch (error) {
+        console.error('Webhook signature verification failed:', error);
+        return false;
+    }
+};
+
+/**
+ * Capture a payment manually if it wasn't captured automatically
+ * @param {string} paymentId - Razorpay payment ID
+ * @param {number} amount - Amount in rupees
+ * @returns {Promise<object>} Captured payment details
+ */
+exports.capturePayment = async (paymentId, amount) => {
+    try {
+        const razorpay = getRazorpayInstance();
+        const amountInPaise = Math.round(amount * 100);
+        const payment = await razorpay.payments.capture(paymentId, amountInPaise, 'INR');
+        return payment;
+    } catch (error) {
+        console.error(`Failed to capture payment ${paymentId}:`, error);
+        throw new Error(`Payment capture failed: ${error.message}`);
+    }
+};
+
+/**
+ * Get all payments for a specific Razorpay Order ID
+ * @param {string} orderId - Razorpay Order ID
+ * @returns {Promise<Array>} List of payments
+ */
+exports.getPaymentsForOrder = async (orderId) => {
+    try {
+        const razorpay = getRazorpayInstance();
+        const payments = await razorpay.orders.fetchPayments(orderId);
+        return payments.items || [];
+    } catch (error) {
+        console.error(`Failed to fetch payments for order ${orderId}:`, error);
+        throw new Error(`Failed to fetch payments: ${error.message}`);
     }
 };
 
