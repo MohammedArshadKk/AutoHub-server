@@ -1,5 +1,5 @@
 const app = require('./app');
-const connectDB = require('./config/database');
+const { connectDB } = require('./config/database');
 const env = require('./config/env');
 const { validateSecrets } = require('./config/env');
 

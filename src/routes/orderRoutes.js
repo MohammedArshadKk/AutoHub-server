@@ -1,37 +1,36 @@
 const express = require('express');
 const router = express.Router();
 const orderController = require('../controllers/orderController');
-const { protectBuyer } = require('../middlewares/authMiddleware');
+const { protectBuyer, protectSeller } = require('../middlewares/authMiddleware');
 const { validateCreateOrder, validatePaymentVerification } = require('../validators/orderValidation');
 
-// All order routes require buyer authentication
-router.use(protectBuyer);
+// ==================== SELLER ROUTES ====================
+// Specific Seller routes must be defined before generic /:orderId to avoid matching conflict
+router.get('/seller/my-orders', protectSeller, orderController.getSellerOrders);
+router.get('/seller/:id', protectSeller, orderController.getSellerOrderById);
+router.patch('/:id/status', protectSeller, orderController.updateOrderStatus);
 
-// ==================== ORDER CREATION ====================
 
-// Create COD order (direct)
-router.post('/', validateCreateOrder, orderController.createOrder);
+// ==================== BUYER ROUTES ====================
 
-// Create order for online payment (before payment)
-router.post('/create-for-payment', validateCreateOrder, orderController.createOrderForPayment);
+// Order Creation
+router.post('/', protectBuyer, validateCreateOrder, orderController.createOrder);
+router.post('/create-for-payment', protectBuyer, validateCreateOrder, orderController.createOrderForPayment);
 
-// ==================== PAYMENT FLOW ====================
+// Payment Flow
 
-// Initiate payment for existing order
-router.post('/:orderId/payment/initiate', orderController.initiatePayment);
+router.post('/:orderId/payment/verify', protectBuyer, validatePaymentVerification, orderController.verifyPaymentAndUpdateOrder);
 
-// Verify payment and update order
-router.post('/:orderId/payment/verify', validatePaymentVerification, orderController.verifyPaymentAndUpdateOrder);
+// Order Management
+router.get('/my-orders', protectBuyer, orderController.getMyOrders);
 
-// ==================== ORDER MANAGEMENT ====================
-
-// Get buyer's orders (must be before /:orderId to avoid conflicts)
-router.get('/my-orders', orderController.getMyOrders);
+// Cancel Order
+router.post('/:orderId/cancel', protectBuyer, orderController.cancelOrder);
 
 // Get single order by ID
-router.get('/:orderId', orderController.getOrderById);
+// Used by Buyer mainly, but controller checks permission. 
+// We keep it protected by Buyer for now as mapped to getOrderById.
+router.get('/:orderId', protectBuyer, orderController.getOrderById);
 
-// Cancel order
-router.post('/:orderId/cancel', orderController.cancelOrder);
 
 module.exports = router;

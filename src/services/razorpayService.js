@@ -35,19 +35,28 @@ const getRazorpayInstance = () => {
  */
 exports.createRazorpayOrder = async (amount, currency = 'INR', receipt = null) => {
     try {
+        if (!amount || isNaN(amount) || amount <= 0) {
+            throw new Error(`Invalid amount for Razorpay order: ${amount}`);
+        }
+
         const options = {
             amount: Math.round(amount * 100), // Convert rupees to paise
             currency: currency,
             receipt: receipt || `receipt_${Date.now()}`,
-            payment_capture: 1, // Auto capture payment after authorization
         };
+
+        console.log('Creating Razorpay order with options:', options);
 
         const razorpay = getRazorpayInstance();
         const order = await razorpay.orders.create(options);
         return order;
     } catch (error) {
-        console.error('Razorpay order creation failed:', error);
-        throw new Error('Failed to create payment order');
+        console.error('Razorpay order creation failed details:', {
+            message: error.message,
+            stack: error.stack,
+            error: error
+        });
+        throw new Error(`Failed to create payment order: ${error.message}`);
     }
 };
 

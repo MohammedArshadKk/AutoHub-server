@@ -9,11 +9,7 @@ const orderItemSchema = new mongoose.Schema({
         ref: 'Product',
         required: true,
     },
-    seller: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Seller',
-        required: true,
-    },
+    // Seller reference is now at the Order level, but keeping strict check
     name: {
         type: String,
         required: true,
@@ -42,6 +38,23 @@ const orderSchema = new mongoose.Schema(
             ref: 'User',
             required: true,
             index: true,
+        },
+
+        // Seller reference (New: One order per seller)
+        seller: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Seller',
+            required: true,
+            index: true,
+        },
+
+        // Seller Details Snapshot (For historical accuracy)
+        sellerDetails: {
+            businessName: String,
+            email: String,
+            phone: String,
+            address: String,
+            gstNumber: String,
         },
 
         // Auto-generated order number (e.g., ORD000001)
@@ -198,17 +211,41 @@ const orderSchema = new mongoose.Schema(
             type: String,
             enum: [
                 'payment_pending', // Waiting for online payment
-                'pending', // COD - awaiting confirmation
-                'confirmed', // Order confirmed
+                'pending', // COD - awaiting confirmation OR Online - Paid & Pending Confirmation
+                'confirmed', // Order confirmed by Seller
                 'processing', // Being prepared
                 'shipped', // On the way
+                'out_for_delivery', // Out for delivery
                 'delivered', // Delivered successfully
-                'cancelled', // Cancelled by user/admin
+                'cancelled', // Cancelled by user/admin/seller
+                'returned', // Returned by user
                 'payment_failed', // Payment verification failed
             ],
             default: 'pending',
             index: true,
         },
+
+        // Status History Tracking
+        statusHistory: [{
+            status: {
+                type: String,
+                required: true
+            },
+            timestamp: {
+                type: Date,
+                default: Date.now
+            },
+            note: String,
+            updatedBy: {
+                type: mongoose.Schema.Types.ObjectId,
+                refPath: 'statusHistory.userModel' // Dynamic reference to User or Seller or Admin
+            },
+            userModel: {
+                type: String,
+                required: true,
+                enum: ['User', 'Seller', 'Admin']
+            }
+        }],
 
         // Timestamps
         orderedAt: {
@@ -225,6 +262,7 @@ const orderSchema = new mongoose.Schema(
         // Additional info
         orderNotes: String,
         trackingNumber: String,
+        courierPartner: String,
         cancellationReason: String,
     },
     {
@@ -237,6 +275,11 @@ const orderSchema = new mongoose.Schema(
 // Performance indexes for buyer queries
 orderSchema.index({ buyer: 1, orderStatus: 1 });
 orderSchema.index({ buyer: 1, orderedAt: -1 });
+
+// Performance indexes for seller queries
+orderSchema.index({ seller: 1, orderStatus: 1 });
+orderSchema.index({ seller: 1, orderedAt: -1 });
+
 orderSchema.index({ orderNumber: 1 });
 orderSchema.index({ razorpayOrderId: 1 });
 
@@ -250,7 +293,9 @@ orderSchema.pre('save', async function (next) {
     if (!this.orderNumber) {
         try {
             const count = await this.constructor.countDocuments();
-            this.orderNumber = `ORD${String(count + 1).padStart(6, '0')}`;
+            // Add random 4 digits to avoid collision in high concurrency if needed, 
+            // but for now simple increment + checking valid unique index
+            this.orderNumber = `ORD${String(count + 1).padStart(8, '0')}`;
         } catch (error) {
             return next(error);
         }
@@ -264,13 +309,13 @@ orderSchema.pre('save', async function (next) {
  * Check if order can be cancelled
  */
 orderSchema.methods.canBeCancelled = function () {
-    return ['pending', 'payment_pending', 'confirmed'].includes(this.orderStatus);
+    return ['pending', 'payment_pending', 'confirmed', 'processing'].includes(this.orderStatus);
 };
 
 /**
  * Cancel the order
  */
-orderSchema.methods.cancel = async function (reason) {
+orderSchema.methods.cancel = async function (reason, cancelledBy, userModel) {
     if (!this.canBeCancelled()) {
         throw new Error('This order cannot be cancelled');
     }
@@ -280,6 +325,14 @@ orderSchema.methods.cancel = async function (reason) {
     if (reason) {
         this.cancellationReason = reason;
     }
+
+    // Add to history
+    this.statusHistory.push({
+        status: 'cancelled',
+        note: reason,
+        updatedBy: cancelledBy,
+        userModel: userModel
+    });
 
     return this.save();
 };
@@ -301,7 +354,8 @@ orderSchema.statics.findByBuyer = function (buyerId, options = {}) {
         .sort({ orderedAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
-        .populate('items.product', 'name images price');
+        .populate('items.product', 'name images price')
+        .populate('seller', 'businessName');
 };
 
 const Order = mongoose.model('Order', orderSchema);
