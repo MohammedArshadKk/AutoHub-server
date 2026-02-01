@@ -9,6 +9,7 @@ const { protectBuyer } = require('../middlewares/authMiddleware');
  * @access  Private (Buyer)
  */
 router.post('/', protectBuyer, cartController.addToCart);
+router.post('/sync', protectBuyer, cartController.syncCart);
 
 /**
  * @route   GET /api/v1/cart

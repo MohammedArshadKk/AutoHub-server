@@ -167,6 +167,10 @@ app.use('/api/v1/orders', orderRoutes);
 // Bulk Product Upload (Admin)
 app.use('/api/v1/products/bulk', bulkUploadRoutes);
 
+// System Configuration (Admin)
+const configRoutes = require('./routes/configRoutes');
+app.use('/api/v1/config', configRoutes);
+
 // ==================== 404 HANDLER ==================== //
 
 app.all('*', (req, res, next) => {

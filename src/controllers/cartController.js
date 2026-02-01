@@ -68,6 +68,71 @@ exports.addToCart = catchAsync(async (req, res, next) => {
 });
 
 /**
+ * @desc    Sync guest cart items to backend
+ * @route   POST /api/v1/cart/sync
+ * @access  Private (Buyer)
+ * @body    { items: Array<{id: string, quantity: number}> }
+ */
+exports.syncCart = catchAsync(async (req, res, next) => {
+    const { items } = req.body;
+
+    if (!items || !Array.isArray(items)) {
+        return next(AppError.badRequest('Items array is required for sync'));
+    }
+
+    // Find or create cart
+    let cart = await Cart.findOrCreateCart(req.user._id);
+
+    // Filter valid products and sync
+    for (const item of items) {
+        const productId = item.id || item._id;
+        const quantity = item.quantity || 1;
+
+        if (!productId) continue;
+
+        const product = await Product.findById(productId);
+        if (!product || product.status !== 'ACTIVE' || product.isDeleted) continue;
+
+        // Check stock (simplified for sync - we take what's available up to requested)
+        const availableQty = Math.min(quantity, product.stock);
+        if (availableQty <= 0) continue;
+
+        // Check if item already exists to avoid over-stocking
+        const existingItem = cart.items.find(
+            (i) => i.product.toString() === productId.toString()
+        );
+
+        const currentInCart = existingItem?.quantity || 0;
+
+        // If it already exists, we might want to SUM or SET. 
+        // For guest-to-member sync, SUM is usually expected (merging).
+        // However, we must not exceed stock.
+        const remainingStock = product.stock - currentInCart;
+        const finalQtyToAdd = Math.min(availableQty, remainingStock);
+
+        if (finalQtyToAdd > 0) {
+            cart.addItem(productId, finalQtyToAdd, product.price);
+        }
+    }
+
+    await cart.save();
+
+    // Populate product details
+    await cart.populate({
+        path: 'items.product',
+        select: 'name price images stock category condition',
+    });
+
+    res.status(200).json({
+        status: 'success',
+        data: {
+            cart,
+        },
+    });
+});
+
+
+/**
  * @desc    Get buyer's cart with populated products
  * @route   GET /api/v1/cart
  * @access  Private (Buyer)

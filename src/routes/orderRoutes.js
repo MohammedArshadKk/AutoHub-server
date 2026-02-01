@@ -27,6 +27,7 @@ router.patch('/:id/status', protectSeller, orderController.updateOrderStatus);
 // ==================== BUYER ROUTES ====================
 
 // Order Creation
+router.post('/preview', protectBuyer, validateCreateOrder, orderController.previewOrder);
 router.post('/', protectBuyer, validateCreateOrder, orderController.createOrder);
 router.post('/create-for-payment', protectBuyer, validateCreateOrder, orderController.createOrderForPayment);
 

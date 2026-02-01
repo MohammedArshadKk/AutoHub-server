@@ -8,6 +8,8 @@ const AppError = require('../utils/AppError');
 const mongoose = require('mongoose');
 const { supportsTransactions } = require('../config/database');
 
+const configController = require('./configController');
+
 // Helper to group items by seller
 const groupItemsBySeller = (items) => {
     const grouped = {};
@@ -22,14 +24,21 @@ const groupItemsBySeller = (items) => {
     return grouped;
 };
 
-// Helper to calculate pricing for a group of items
-const calculateOrderPricing = (items) => {
+// Helper to calculate pricing for a group of items (Now accepts config & calculated shipping)
+const calculateOrderPricing = (items, config, shippingCost = 0) => {
     let subtotal = 0;
     for (const item of items) {
         subtotal += item.price * item.quantity;
     }
-    const shippingCharge = subtotal >= 1000 ? 0 : 50;
-    const handlingCharge = 20;
+
+    // Check Config Free Shipping Threshold (applies to subtotal)
+    let finalShipping = shippingCost;
+    if (config && config.shipping && subtotal >= config.shipping.freeShippingThreshold) {
+        finalShipping = 0;
+    }
+
+    const shippingCharge = finalShipping;
+    const handlingCharge = config?.shipping?.handlingCharge || 0;
     const tax = 0;
     const totalAmount = subtotal + shippingCharge + handlingCharge + tax;
 
@@ -41,8 +50,16 @@ const calculateOrderPricing = (items) => {
  * POST /api/v1/orders
  */
 exports.createOrder = catchAsync(async (req, res, next) => {
-    const { items, shippingAddress } = req.body;
+    const { items, shippingAddress, paymentMethod } = req.body; // paymentMethod extracted
     const buyerId = req.user._id;
+
+    // 0. Fetch System Config
+    const config = await configController.getOrInitConfig();
+
+    // 1. Validate Payment Method Global Switch
+    if (paymentMethod === 'cod' && !config.codEnabled) {
+        return next(AppError.badRequest('Cash on Delivery is currently disabled by the admin'));
+    }
 
     // Validate input
     if (!items || items.length === 0) {
@@ -57,7 +74,7 @@ exports.createOrder = catchAsync(async (req, res, next) => {
     const validatedItems = [];
 
     for (const item of items) {
-        const product = await Product.findById(item._id).populate('seller'); // Need seller info for grouping
+        const product = await Product.findById(item._id).populate('seller');
 
         if (!product) {
             return next(AppError.notFound(`Product "${item.name}" not found`));
@@ -76,7 +93,7 @@ exports.createOrder = catchAsync(async (req, res, next) => {
         validatedItems.push({
             product: product._id,
             seller: product.seller._id, // Grouping key
-            sellerInfo: product.seller, // For snapshot
+            sellerInfo: product.seller, // For snapshot & location
             name: product.name,
             price: product.price,
             quantity: item.quantity,
@@ -98,8 +115,33 @@ exports.createOrder = catchAsync(async (req, res, next) => {
 
     try {
         for (const [sellerId, groupItems] of Object.entries(sellerGroups)) {
-            const pricing = calculateOrderPricing(groupItems);
             const sellerInfo = groupItems[0].sellerInfo;
+
+            // 2. Calculate Shipping Distance & Cost
+            let shippingCost = 0;
+            if (config.shipping.mode === 'DISTANCE') {
+                // Seller Location
+                const sLat = sellerInfo.location?.latitude;
+                const sLon = sellerInfo.location?.longitude;
+                // Buyer Location (from Shipping Address Payload)
+                const bLat = shippingAddress.latitude;
+                const bLon = shippingAddress.longitude;
+
+                if (sLat && sLon && bLat && bLon) {
+                    const distance = configController.calculateDistance(sLat, sLon, bLat, bLon);
+                    shippingCost = configController.calculateShippingCharge(config, distance);
+                    console.log(`🚚 Shipping Calc: ${distance.toFixed(2)} km -> ₹${shippingCost}`);
+                } else {
+                    // Fallback if coordinates missing: Use Base Charge or default
+                    console.warn('⚠️ Missing coordinates for distance calc. Using base charge.');
+                    shippingCost = config.shipping.baseCharge;
+                }
+            } else {
+                // Flat
+                shippingCost = config.shipping.baseCharge;
+            }
+
+            const pricing = calculateOrderPricing(groupItems, config, shippingCost);
 
             const sellerSnapshot = {
                 businessName: sellerInfo.businessName,
@@ -180,12 +222,19 @@ exports.createOrder = catchAsync(async (req, res, next) => {
  * Create order for online payment (before payment) - Split by Seller
  * POST /api/v1/orders/create-for-payment
  */
+/**
+ * Create order for online payment (before payment) - Split by Seller
+ * POST /api/v1/orders/create-for-payment
+ */
 exports.createOrderForPayment = catchAsync(async (req, res, next) => {
     const { items, shippingAddress } = req.body;
     const buyerId = req.user._id;
 
     if (!items || items.length === 0) return next(AppError.badRequest('Order must contain at least one item'));
     if (!shippingAddress) return next(AppError.badRequest('Shipping address is required'));
+
+    // 0. Fetch System Config (Used for Shipping Calc)
+    const config = await configController.getOrInitConfig();
 
     const validatedItems = [];
     let grandTotal = 0;
@@ -213,7 +262,30 @@ exports.createOrderForPayment = catchAsync(async (req, res, next) => {
 
     // Calculate Grand Total for Razorpay Order
     for (const groupItems of Object.values(sellerGroups)) {
-        const pricing = calculateOrderPricing(groupItems);
+        const sellerInfo = groupItems[0].sellerInfo;
+
+        // Shipping Logic (Same as createOrder)
+        let shippingCost = 0;
+        if (config.shipping.mode === 'DISTANCE') {
+            const sLat = sellerInfo.location?.latitude;
+            const sLon = sellerInfo.location?.longitude;
+            const bLat = shippingAddress.latitude;
+            const bLon = shippingAddress.longitude;
+
+            if (sLat && sLon && bLat && bLon) {
+                const distance = configController.calculateDistance(sLat, sLon, bLat, bLon);
+                shippingCost = configController.calculateShippingCharge(config, distance);
+            } else {
+                shippingCost = config.shipping.baseCharge;
+            }
+        } else {
+            shippingCost = config.shipping.baseCharge;
+        }
+
+        // Apply pricing with shipping
+        const pricing = calculateOrderPricing(groupItems, config, shippingCost);
+
+        // Add to grand total
         grandTotal += pricing.totalAmount;
     }
 
@@ -248,8 +320,28 @@ exports.createOrderForPayment = catchAsync(async (req, res, next) => {
 
     try {
         for (const [sellerId, groupItems] of Object.entries(sellerGroups)) {
-            const pricing = calculateOrderPricing(groupItems);
+            // Re-calculate pricing to save (optimization: could store from previous loop but clearer here)
             const sellerInfo = groupItems[0].sellerInfo;
+
+            // Shipping Logic AGAIN (or pass it? safer to re-calc to be sure matching grandTotal logic)
+            let shippingCost = 0;
+            if (config.shipping.mode === 'DISTANCE') {
+                const sLat = sellerInfo.location?.latitude;
+                const sLon = sellerInfo.location?.longitude;
+                const bLat = shippingAddress.latitude;
+                const bLon = shippingAddress.longitude;
+
+                if (sLat && sLon && bLat && bLon) {
+                    const distance = configController.calculateDistance(sLat, sLon, bLat, bLon);
+                    shippingCost = configController.calculateShippingCharge(config, distance);
+                } else {
+                    shippingCost = config.shipping.baseCharge;
+                }
+            } else {
+                shippingCost = config.shipping.baseCharge;
+            }
+
+            const pricing = calculateOrderPricing(groupItems, config, shippingCost);
 
             const sellerSnapshot = {
                 businessName: sellerInfo.businessName,
@@ -307,6 +399,91 @@ exports.createOrderForPayment = catchAsync(async (req, res, next) => {
             orderIds: pendingOrders.map(o => o._id), // Return all DB IDs
             count: pendingOrders.length
         },
+    });
+});
+
+/**
+ * Preview Order (Simulate costs)
+ * POST /api/v1/orders/preview
+ */
+exports.previewOrder = catchAsync(async (req, res, next) => {
+    const { items, shippingAddress } = req.body;
+
+    if (!items || items.length === 0) return next(AppError.badRequest('Order must contain at least one item'));
+    if (!shippingAddress) return next(AppError.badRequest('Shipping address is required'));
+
+    // 0. Fetch Config
+    const config = await configController.getOrInitConfig();
+
+    const validatedItems = [];
+
+    // Validate Items & Stocks
+    for (const item of items) {
+        const product = await Product.findById(item._id).populate('seller');
+        if (!product) return next(AppError.notFound(`Product "${item.name}" not found`));
+
+        validatedItems.push({
+            product: product._id,
+            seller: product.seller._id,
+            sellerInfo: product.seller,
+            name: product.name,
+            price: product.price,
+            quantity: item.quantity,
+        });
+    }
+
+    const sellerGroups = groupItemsBySeller(validatedItems);
+
+    let grandSubtotal = 0;
+    let grandShipping = 0;
+    let grandTotal = 0;
+    const breakdown = [];
+
+    // Calculate per group
+    for (const [sellerId, groupItems] of Object.entries(sellerGroups)) {
+        const sellerInfo = groupItems[0].sellerInfo;
+
+        // Shipping Logic
+        let shippingCost = 0;
+        if (config.shipping.mode === 'DISTANCE') {
+            const sLat = sellerInfo.location?.latitude;
+            const sLon = sellerInfo.location?.longitude;
+            const bLat = shippingAddress.latitude;
+            const bLon = shippingAddress.longitude;
+
+            if (sLat && sLon && bLat && bLon) {
+                const distance = configController.calculateDistance(sLat, sLon, bLat, bLon);
+                shippingCost = configController.calculateShippingCharge(config, distance);
+            } else {
+                shippingCost = config.shipping.baseCharge;
+            }
+        } else {
+            shippingCost = config.shipping.baseCharge;
+        }
+
+        const pricing = calculateOrderPricing(groupItems, config, shippingCost);
+
+        grandSubtotal += pricing.subtotal;
+        grandShipping += pricing.shippingCharge;
+        grandTotal += pricing.totalAmount;
+
+        breakdown.push({
+            seller: sellerInfo.businessName,
+            subtotal: pricing.subtotal,
+            shipping: pricing.shippingCharge,
+            total: pricing.totalAmount
+        });
+    }
+
+    res.json({
+        status: 'success',
+        data: {
+            subtotal: grandSubtotal,
+            shipping: grandShipping,
+            total: grandTotal,
+            breakdown,
+            shippingMode: config.shipping.mode
+        }
     });
 });
 
@@ -1141,8 +1318,11 @@ exports.downloadInvoice = catchAsync(async (req, res, next) => {
         return next(AppError.forbidden('You do not have permission to view this invoice'));
     }
 
+    // 0. Fetch System Config for Support Info
+    const config = await configController.getOrInitConfig();
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=invoice-${order.orderNumber}.pdf`);
 
-    invoiceService.generateInvoiceStream(order, res);
+    invoiceService.generateInvoiceStream(order, config, res);
 });

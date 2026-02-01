@@ -85,6 +85,8 @@ const orderSchema = new mongoose.Schema(
             state: { type: String, required: true },
             zipCode: { type: String, required: true },
             country: { type: String, default: 'India' },
+            latitude: Number,
+            longitude: Number
         },
 
         // Pricing breakdown
