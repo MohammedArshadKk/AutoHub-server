@@ -41,6 +41,9 @@ router.get('/my-orders', protectBuyer, orderController.getMyOrders);
 // Cancel Order
 router.post('/:orderId/cancel', protectBuyer, orderController.cancelOrder);
 
+// Download Invoice
+router.get('/:orderId/invoice', protectBuyer, orderController.downloadInvoice);
+
 // Get single order by ID
 // Used by Buyer mainly, but controller checks permission. 
 // We keep it protected by Buyer for now as mapped to getOrderById.

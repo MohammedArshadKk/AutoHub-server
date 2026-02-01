@@ -1,4 +1,5 @@
 const Order = require('../models/Order');
+const invoiceService = require('../services/invoiceService');
 const Product = require('../models/Product');
 const Seller = require('../models/Seller');
 const razorpayService = require('../services/razorpayService');
@@ -1117,6 +1118,31 @@ exports.handlePaymentCallback = catchAsync(async (req, res, next) => {
 
     } catch (error) {
         console.error('Callback processing error:', error);
-        return res.redirect(`${frontendUrl}/orders?error=Processing_Error`);
     }
+});
+
+/**
+ * Download Invoice
+ * GET /api/v1/orders/:orderId/invoice
+ */
+exports.downloadInvoice = catchAsync(async (req, res, next) => {
+    const { orderId } = req.params;
+    const userId = req.user._id;
+
+    const order = await Order.findById(orderId)
+        .populate('items.product', 'name price')
+        .populate('buyer', 'name email')
+        .populate('seller', 'businessName address phone email');
+
+    if (!order) return next(AppError.notFound('Order not found'));
+
+    // Check ownership
+    if (order.buyer._id.toString() !== userId.toString() && req.user.role !== 'admin') {
+        return next(AppError.forbidden('You do not have permission to view this invoice'));
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=invoice-${order.orderNumber}.pdf`);
+
+    invoiceService.generateInvoiceStream(order, res);
 });
