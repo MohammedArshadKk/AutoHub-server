@@ -7,7 +7,10 @@ const { validateCreateOrder, validatePaymentVerification } = require('../validat
 
 // ==================== WEBHOOK ROUTES ====================
 // Public routes protected by signature verification
+// Public routes protected by signature verification
 router.post('/webhook/razorpay', webhookController.handleRazorpayWebhook);
+router.post('/payment/callback', orderController.handlePaymentCallback); // Handle Redirect Callback
+
 
 // ==================== ADMIN ROUTES ====================
 router.get('/admin/all', protectAdmin, orderController.getAdminOrders);

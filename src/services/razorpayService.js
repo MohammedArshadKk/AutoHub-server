@@ -21,6 +21,7 @@ const getRazorpayInstance = () => {
         razorpayInstance = new Razorpay({
             key_id: keyId,
             key_secret: keySecret,
+
         });
     }
     return razorpayInstance;

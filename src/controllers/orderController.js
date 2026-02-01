@@ -1009,3 +1009,114 @@ exports.adminUpdateOrderStatus = catchAsync(async (req, res, next) => {
         data: { order }
     });
 });
+
+/**
+ * Handle Razorpay Payment Callback (POST)
+ * Used when callback_url is provided in checkout options
+ */
+exports.handlePaymentCallback = catchAsync(async (req, res, next) => {
+    // Razorpay sends data in body (x-www-form-urlencoded)
+    const { razorpay_payment_id, razorpay_order_id, razorpay_signature, error_code, error_description } = req.body;
+
+    console.log('🔄 Razorpay Callback received:', req.body);
+    const frontendUrl = process.env.BUYER_FRONTEND_URL || 'http://localhost:5173';
+
+    // Handle Failure Callback (if applicable)
+    if (error_code) {
+        console.error(`❌ Razorpay Callback Error: ${error_code} - ${error_description}`);
+        // Redirect to My Orders or Checkout
+        return res.redirect(`${frontendUrl}/orders?error=${encodeURIComponent(error_description || 'Payment Failed')}`);
+    }
+
+    if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+        console.error('❌ Missing payment details in callback');
+        return res.redirect(`${frontendUrl}/orders?error=Invalid_Callback_Data`);
+    }
+
+    try {
+        // 1. Verify Signature
+        const isValid = razorpayService.verifyPaymentSignature(
+            razorpay_order_id,
+            razorpay_payment_id,
+            razorpay_signature
+        );
+
+        if (!isValid) {
+            console.error('❌ Signature Verification Failed in Callback');
+            return res.redirect(`${frontendUrl}/orders?error=Signature_Verification_Failed`);
+        }
+
+        // 2. Find Order(s)
+        // Note: No auth req.user available here, so we find by razorpayOrderId solely.
+        const orders = await Order.find({ razorpayOrderId: razorpay_order_id });
+        if (!orders || orders.length === 0) {
+            console.error(`❌ Order not found for Razorpay Order ID: ${razorpay_order_id}`);
+            return res.redirect(`${frontendUrl}/orders?error=Order_Not_Found`);
+        }
+
+        // 3. Process Success (Update Orders)
+        // Check if already paid to avoid duplicate processing
+        if (orders[0].paymentStatus === 'paid') {
+            console.log('ℹ️ Order already paid. Redirecting to success.');
+            return res.redirect(`${frontendUrl}/order-success?orderId=${orders[0]._id}`);
+        }
+
+        // Fetch Payment Details from Razorpay to get method info
+        let paymentDetails;
+        try {
+            paymentDetails = await razorpayService.getPaymentDetails(razorpay_payment_id);
+        } catch (e) {
+            console.warn("Could not fetch payment details in callback", e);
+            paymentDetails = { method: 'online (callback)', status: 'captured' };
+        }
+
+        const updatedOrders = await Promise.all(orders.map(async (order) => {
+            if (order.paymentStatus === 'paid') return order;
+
+            order.paymentStatus = 'paid';
+            order.orderStatus = 'confirmed';
+            order.razorpayPaymentId = razorpay_payment_id;
+            order.razorpaySignature = razorpay_signature;
+            order.transactionId = paymentDetails.acquirer_data?.bank_transaction_id || paymentDetails.id || razorpay_payment_id;
+            order.paidAt = new Date();
+            order.confirmedAt = new Date();
+
+            order.paymentDetails = {
+                method: paymentDetails.method || 'online',
+                bank: paymentDetails.bank,
+                wallet: paymentDetails.wallet,
+                vpa: paymentDetails.vpa,
+                card: paymentDetails.card
+            };
+
+            order.statusHistory.push({
+                status: 'confirmed',
+                note: 'Payment successful (Callback)',
+                timestamp: new Date(),
+                userModel: 'User' // We don't have req.user from callback auth reliably
+            });
+
+            // Stock update
+            for (const item of order.items) {
+                await Product.findByIdAndUpdate(item.product, {
+                    $inc: { stock: -item.quantity },
+                    $set: { lastSoldAt: new Date() }
+                });
+                Seller.findByIdAndUpdate(order.seller, {
+                    $inc: { 'metrics.totalOrders': 1, 'metrics.totalRevenue': order.totalAmount }
+                }).exec().catch(() => { });
+            }
+
+            return order.save();
+        }));
+
+        // 4. Redirect to Success Page
+        // Use the first order ID for the "View Order" link
+        const targetOrderId = updatedOrders[0]._id;
+        return res.redirect(`${frontendUrl}/order-success?orderId=${targetOrderId}&clear_cart=true`);
+
+    } catch (error) {
+        console.error('Callback processing error:', error);
+        return res.redirect(`${frontendUrl}/orders?error=Processing_Error`);
+    }
+});

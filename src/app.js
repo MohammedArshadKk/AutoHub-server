@@ -83,12 +83,18 @@ const corsOptions = {
                 env.sellerFrontendUrl,
                 'http://localhost:3000',
                 'http://localhost:3001', // Seller frontend
-                'http://localhost:5173'
+                'http://localhost:5173',
+                // Razorpay origins
+                'https://api.razorpay.com',
+                'https://checkout.razorpay.com',
+                'null' // Sometimes redirected POST comes as 'null' origin
             ];
 
+        // Strict check: origin must be in allowedOrigins
         if (allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
+            console.warn(`Blocked by CORS: ${origin}`);
             callback(new Error('Not allowed by CORS'));
         }
     },
