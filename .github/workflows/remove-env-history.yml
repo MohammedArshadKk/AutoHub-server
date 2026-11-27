@@ -1,0 +1,70 @@
+
+name: Remove .env from Git History
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_cleanup:
+        description: "Confirm permanent Git history rewrite"
+        required: true
+        type: choice
+        options:
+          - "NO"
+          - "YES"
+
+permissions:
+  contents: write
+
+jobs:
+  remove-env:
+    if: inputs.confirm_cleanup == 'YES'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install git-filter-repo
+        run: |
+          python -m pip install --upgrade git-filter-repo
+
+      - name: Prepare remote branches
+        run: |
+          git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin/ |
+          while IFS= read -r branch; do
+            if [ "$branch" != "HEAD" ] && [ -n "$branch" ]; then
+              if ! git show-ref --verify --quiet "refs/heads/$branch"; then
+                git branch "$branch" "refs/remotes/origin/$branch"
+              fi
+            fi
+          done
+
+      - name: Remove root .env from all history
+        run: |
+          git filter-repo \
+            --sensitive-data-removal \
+            --invert-paths \
+            --path .env \
+            --force
+
+      - name: Verify cleanup
+        run: |
+          if git log --all --format='%H' -- .env | grep -q .; then
+            echo "ERROR: .env still exists in history"
+            exit 1
+          else
+            echo "SUCCESS: root .env removed from history"
+          fi
+
+      - name: Push cleaned history
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git remote add origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          git push --force origin --all
+          git push --force origin --tags
