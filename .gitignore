@@ -31,3 +31,7 @@ coverage/
 # Misc
 *.pem
 *.key
+
+.env
+.env.*
+!.env.example
